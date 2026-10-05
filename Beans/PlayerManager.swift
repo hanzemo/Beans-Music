@@ -1076,9 +1076,10 @@ final class PlayerManager: NSObject, ObservableObject {
 
     /// 本地文件播放的进度 / 结束 / 失败监听。
     private func installLocalPlaybackObservers(player: AVPlayer, item: AVPlayerItem, song: Song) {
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { [weak self] time in
+        // 0.5 秒更新一次进度足够 UI 平滑；原 0.2s 频率太高导致主线程重算风暴。
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self, let player = self.player else { return }
-            if time.seconds.isFinite, abs(time.seconds - self.lastPublishedProgress) >= 0.18 {
+            if time.seconds.isFinite, abs(time.seconds - self.lastPublishedProgress) >= 0.45 {
                 self.lastPublishedProgress = time.seconds
                 self.progress = time.seconds
                 if abs(time.seconds - self.lastPersistedProgress) >= 2.0 {
@@ -1298,10 +1299,10 @@ final class PlayerManager: NSObject, ObservableObject {
             bumpPlayCount(song)
             lastCountedSongID = song.identityKey
         }
-        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { [weak self] time in
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.5, preferredTimescale: 600), queue: .main) { [weak self] time in
             guard let self, let player = self.player else { return }
             if time.seconds.isFinite {
-                if abs(time.seconds - self.lastPublishedProgress) >= 0.18 {
+                if abs(time.seconds - self.lastPublishedProgress) >= 0.45 {
                     self.lastPublishedProgress = time.seconds
                     self.progress = time.seconds
                     if abs(time.seconds - self.lastPersistedProgress) >= 2.0 {
