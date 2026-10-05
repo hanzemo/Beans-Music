@@ -76,9 +76,9 @@ struct NCMFileInfo: Sendable {
 
 // MARK: - 解密器
 
-/// 加密音乐解密统一入口。
-///
-/// 所有方法都是纯计算 + 文件 IO，不依赖任何网络，可在后台线程调用。
+    /// NCM 解密算法版本。任何影响输出字节的改动都要 +1，
+    /// 用于缓存文件名前缀，避免新算法装包后仍读到旧缓存。
+    static let decryptVersion: Int = 2
 enum EncryptedAudioDecryptor {
 
     /// 解密给定文件并返回解密后音频的**字节数据**。
@@ -218,14 +218,36 @@ enum EncryptedAudioDecryptor {
     }
 
     /// 从 AES-ECB 解密后的密钥块中提取"关键流密钥材料"。
-    /// 末字节是 PKCS#7 填充量，若 > 16 则视为无效填充（等价于无填充）。
+    ///
+    /// 严格对齐 taurusxin/ncmdump 的 aesEcbDecrypt：
+    ///   for (i = 0; i < n - 1; i++) { aes.decrypt(...); dst += out; }      // 前 n-1 块原样
+    ///   aes.decrypt(...);
+    ///   char pad = out[15];
+    ///   if (pad > 16) pad = 0;
+    ///   dst += std::string((char *)out, 16 - pad);                          // 只处理最后一块
+    ///
+    /// 关键点：padding 只作用于**最后一个 16 字节块**，不影响前面块。
+    /// 这样即使末字节偶然落在 1..16 范围（数据看起来像有效 padding），也只从末块剥离，
+    /// 与 ncmdump 行为完全一致。
     private static func extractKeyMaterial(from decrypted: [UInt8]) -> [UInt8] {
-        guard let last = decrypted.last else { return [] }
-        let pad = Int(last)
-        guard pad > 0 && pad <= 16, decrypted.count >= pad else {
-            return decrypted
+        let n = decrypted.count / 16
+        guard n > 0 else { return decrypted }
+
+        var out = [UInt8]()
+        out.reserveCapacity(decrypted.count)
+
+        // 前 n-1 块：整块 16 字节直接拷入
+        for i in 0..<(n - 1) {
+            let start = i * 16
+            out.append(contentsOf: decrypted[start..<(start + 16)])
         }
-        return Array(decrypted.dropLast(pad))
+
+        // 最后一块：根据末字节决定有效长度
+        let lastStart = (n - 1) * 16
+        let pad = Int(decrypted[lastStart + 15])
+        let validPad = pad > 16 ? 0 : pad
+        out.append(contentsOf: decrypted[lastStart..<(lastStart + 16 - validPad)])
+        return out
     }
 
     private static func readU32(_ bytes: [UInt8], _ pos: inout Int) -> Int? {

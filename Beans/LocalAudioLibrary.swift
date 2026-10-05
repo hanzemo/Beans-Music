@@ -257,6 +257,10 @@ final class LocalAudioLibrary: ObservableObject {
         )
     }
 
+    /// 解密算法版本前缀：任何影响输出字节的解密逻辑改动都要 +1，
+    /// 强制新包绕过旧缓存，避免"改了代码但缓存文件还是坏的"这种情况。
+    static let decryptCacheVersion = "v2"
+
     /// 与实例无关的解密入口：可安全地从任意线程（含 detached task）调用。
     nonisolated static func playableURL(for song: Song, musicDir: URL, cacheDir: URL) throws -> URL {
         guard song.source == .local, let fileName = song.localFileName else {
@@ -277,7 +281,8 @@ final class LocalAudioLibrary: ObservableObject {
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
 
         let outExt = EncryptedAudioDecryptor.decryptedExtension(for: sourceURL)
-        let outURL = cacheDir.appendingPathComponent("\(stableHash(fileName)).\(outExt)")
+        let hash = stableHash(fileName)
+        let outURL = cacheDir.appendingPathComponent("\(decryptCacheVersion)_\(hash).\(outExt)")
 
         if let outAttrs = try? FileManager.default.attributesOfItem(atPath: outURL.path),
            let srcAttrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
