@@ -75,11 +75,16 @@ struct NCMFileInfo: Sendable {
 }
 
 // MARK: - 解密器
+//
+// 缓存版本前缀：任何影响解密输出字节的改动都要 +1，
+// 用于缓存文件名前缀，避免新算法装包后仍读到旧缓存。
 
-    /// NCM 解密算法版本。任何影响输出字节的改动都要 +1，
-    /// 用于缓存文件名前缀，避免新算法装包后仍读到旧缓存。
-    static let decryptVersion: Int = 2
+/// 加密音乐解密统一入口。
+///
+/// 所有方法都是纯计算 + 文件 IO，不依赖任何网络，可在后台线程调用。
 enum EncryptedAudioDecryptor {
+    static let beansDecryptCacheVersion = "v2"
+    static let beansDecryptCacheVersion = "v2"
 
     /// 解密给定文件并返回解密后音频的**字节数据**。
     static func decrypt(fileAt url: URL) throws -> Data {

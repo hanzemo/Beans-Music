@@ -282,7 +282,7 @@ final class LocalAudioLibrary: ObservableObject {
 
         let outExt = EncryptedAudioDecryptor.decryptedExtension(for: sourceURL)
         let hash = stableHash(fileName)
-        let outURL = cacheDir.appendingPathComponent("\(decryptCacheVersion)_\(hash).\(outExt)")
+        let outURL = cacheDir.appendingPathComponent("\(beansDecryptCacheVersion)_\(hash).\(outExt)")
 
         if let outAttrs = try? FileManager.default.attributesOfItem(atPath: outURL.path),
            let srcAttrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
@@ -293,9 +293,23 @@ final class LocalAudioLibrary: ObservableObject {
         }
 
         let data = try EncryptedAudioDecryptor.decrypt(fileAt: sourceURL)
+        // 校验解密结果是否包含合理的音频签名（ID3 / fLaC / OggS / MP3 帧头），
+        // 便于诊断解密是否正确。签名无效但文件仍会写出，方便用户回包排查。
+        let sig = [UInt8](data.prefix(4))
+        let hasValidSig = (sig.count >= 3 && sig[0] == 0x49 && sig[1] == 0x44 && sig[2] == 0x33)  // ID3
+            || (sig.count >= 4 && sig[0] == 0x66 && sig[1] == 0x4C && sig[2] == 0x61 && sig[3] == 0x43)  // fLaC
+            || (sig.count >= 4 && sig[0] == 0x4F && sig[1] == 0x67 && sig[2] == 0x67 && sig[3] == 0x53)  // OggS
+            || (sig.count >= 2 && sig[0] == 0xFF && (sig[1] & 0xE0) == 0xE0)  // MP3 帧
+        let sigHex = sig.prefix(8).map { String(format: "%02x", $0) }.joined()
+        BeansLogger.shared.log(
+            "本地音乐解密完成：\(fileName) → \(outURL.lastPathComponent)（\(data.count) 字节｜签名有效=\(hasValidSig)｜前8B=\(sigHex)）",
+            level: .info
+        )
+        if !hasValidSig {
+            BeansLogger.shared.log("⚠️ 解密产物缺少音频签名，可能是解密失败（文件仍写出，供排查）", level: .error)
+        }
         try? FileManager.default.removeItem(at: outURL)
         try data.write(to: outURL, options: .atomic)
-        BeansLogger.shared.log("本地音乐解密完成：\(fileName) → \(outURL.lastPathComponent)（\(data.count) 字节）", level: .info)
         return outURL
     }
 
@@ -338,9 +352,13 @@ final class LocalAudioLibrary: ObservableObject {
         guard let entries = try? fileManager.contentsOfDirectory(
             at: decryptedCacheDirectory, includingPropertiesForKeys: nil
         ) else { return }
-        let prefix = Self.stableHash(fileName)
-        for entry in entries where entry.deletingPathExtension().lastPathComponent == prefix {
-            try? fileManager.removeItem(at: entry)
+        let hash = Self.stableHash(fileName)
+        for entry in entries {
+            let stem = entry.deletingPathExtension().lastPathComponent
+            // 匹配 v2_hash 或旧版 hash（不带版本前缀）
+            if stem == hash || stem == "\(beansDecryptCacheVersion)_\(hash)" {
+                try? fileManager.removeItem(at: entry)
+            }
         }
     }
 
@@ -352,8 +370,15 @@ final class LocalAudioLibrary: ObservableObject {
             guard let name = song.localFileName else { return nil }
             return Self.stableHash(name)
         })
-        for entry in entries where !validHashes.contains(entry.deletingPathExtension().lastPathComponent) {
-            try? fileManager.removeItem(at: entry)
+        for entry in entries {
+            let stem = entry.deletingPathExtension().lastPathComponent
+            // 去掉 vN_ 前缀后再比对 hash
+            let baseHash = stem.hasPrefix(beansDecryptCacheVersion + "_")
+                ? String(stem.dropFirst(beansDecryptCacheVersion.count + 1))
+                : stem
+            if !validHashes.contains(baseHash) {
+                try? fileManager.removeItem(at: entry)
+            }
         }
     }
 
