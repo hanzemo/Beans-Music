@@ -173,6 +173,24 @@ final class LocalAudioLibrary: ObservableObject {
                 self.isWorking = false
                 self.didInitialScan = true
                 BeansLogger.shared.log("本地音乐扫描完成：\(result.count) 首（目录 \(dir.path)）", level: .info)
+
+                Task.detached(priority: .utility) { [weak self] in
+                    guard let self else { return }
+                    for song in result {
+                        guard let nid = song.linkedNeteaseID else { continue }
+                        do {
+                            guard let detail = try await NetEaseAPI.shared.songDetail(id: nid) else { continue }
+                            await MainActor.run {
+                                guard let idx = self.songs.firstIndex(where: {
+                                    $0.localFileName == song.localFileName
+                                }) else { return }
+                                self.songs[idx] = self.songs[idx].merging(netease: detail)
+                            }
+                        } catch {
+                            BeansLogger.shared.log("本地歌元数据补全失败：\(song.localFileName ?? "?") - \(error)", level: .warn)
+                        }
+                    }
+                }
             }
         }
     }
@@ -202,7 +220,8 @@ final class LocalAudioLibrary: ObservableObject {
             duration: duration,
             source: .local,
             fee: 0,
-            localFileName: old.localFileName
+            localFileName: old.localFileName,
+            linkedNeteaseID: old.linkedNeteaseID
         )
     }
 
@@ -215,6 +234,7 @@ final class LocalAudioLibrary: ObservableObject {
         let ext = url.pathExtension.lowercased()
 
         let platformID = Self.parsePlatformID(fromName: fileName)
+        let linkedID = platformID.flatMap { Int($0) }
 
         // ncm 优先从内嵌元数据回填真实歌名/歌手/时长/专辑
         if isEncrypted, ext == "ncm", let info = ncmMeta, !info.name.isEmpty {
@@ -227,7 +247,8 @@ final class LocalAudioLibrary: ObservableObject {
                 duration: Double(info.duration) / 1000.0,
                 source: .local,
                 fee: 0,
-                localFileName: fileName
+                localFileName: fileName,
+                linkedNeteaseID: linkedID
             )
         }
 
@@ -241,7 +262,8 @@ final class LocalAudioLibrary: ObservableObject {
             duration: 0,
             source: .local,
             fee: 0,
-            localFileName: fileName
+            localFileName: fileName,
+            linkedNeteaseID: linkedID
         )
     }
 

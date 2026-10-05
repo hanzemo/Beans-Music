@@ -84,7 +84,7 @@ struct NCMFileInfo: Sendable {
 /// 所有方法都是纯计算 + 文件 IO，不依赖任何网络，可在后台线程调用。
 /// 缓存版本前缀：任何影响解密输出字节的改动都要 +1。
 /// 用于缓存文件名前缀，避免新算法装包后仍读到旧缓存。
-let beansDecryptCacheVersion = "v2"
+let beansDecryptCacheVersion = "v3"
 
 enum EncryptedAudioDecryptor {
 

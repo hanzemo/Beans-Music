@@ -263,6 +263,16 @@ final class NetEaseAPI {
         return tracks.compactMap(Song.init(json:))
     }
 
+    /// 按歌曲 id 拉取详情
+    func songDetail(id: Int) async throws -> Song? {
+        let json = try await request("/api/v3/song/detail", payload: [
+            "c": "[{\"id\":\(id)}]"
+        ], crypto: "weapi")
+        guard let songs = json["songs"] as? [[String: Any]],
+              let first = songs.first else { return nil }
+        return Song(json: first)
+    }
+
     func songURLs(ids: [Int], level: String = "standard") async throws -> [Int: String] {
         let idsString = "[" + ids.map(String.init).joined(separator: ",") + "]"
         let json = try await request("/api/song/enhance/player/url/v1", payload: ["ids": idsString, "level": level, "encodeType": "flac"], crypto: "eapi")

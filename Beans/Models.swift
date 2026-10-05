@@ -179,6 +179,31 @@ struct Song: Identifiable, Hashable, Codable {
     /// 本机加密音乐文件名（仅 source == .local 时有效，相对「本地音乐」目录）
     let localFileName: String?
 
+    /// 本地文件对应的网易云歌曲 id
+    let linkedNeteaseID: Int?
+
+    /// 用网易云详情补全本地歌曲元数据
+    func merging(netease detail: Song) -> Song {
+        Song(
+            id: self.id,
+            name: detail.name.isEmpty ? self.name : detail.name,
+            artists: detail.artists.isEmpty ? self.artists : detail.artists,
+            album: detail.album.isEmpty ? self.album : detail.album,
+            coverURL: detail.coverURL ?? self.coverURL,
+            duration: detail.duration > 0 ? detail.duration : self.duration,
+            source: .local,
+            qqMid: nil,
+            qqMediaMid: nil,
+            kugouHash: nil,
+            kugouAlbumAudioId: nil,
+            kugouAlbumId: nil,
+            kugouQualityHashes: nil,
+            fee: detail.fee,
+            localFileName: self.localFileName,
+            linkedNeteaseID: self.linkedNeteaseID
+        )
+    }
+
     var formattedDuration: String {
         let total = max(0, Int(duration))
         return String(format: "%d:%02d", total / 60, total % 60)
