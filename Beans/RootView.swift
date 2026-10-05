@@ -107,8 +107,8 @@ struct RootView: View {
         }
 
         ZStack {
-            // iOS 26 用系统 tab accessory，把迷你播放器缩进底栏槽位；
-            // 旧系统（含 iOS 16）直接使用系统 TabView 底栏，迷你播放器叠加在其上方。
+            // iOS 26 用系统 tab accessory 把迷你播放器缩进底栏槽位；
+            // 旧系统（iOS 15 - iOS 17）使用系统 TabView 底栏，MiniPlayer 通过 safeAreaInset 叠加在其上方。
             if #available(iOS 26.0, *) {
                 rootTabs
                     .modifier(
@@ -798,7 +798,9 @@ private struct UpdatePromptOverlay: View {
 // 拿到当前 UITabBar 实例，直接设置固定清透外观（全透明、无阴影）。
 
 struct TabBarAppearanceConfigurator: UIViewControllerRepresentable {
-    var hidesSystemTabBarOnLegacy = true
+    // 默认 false：低系统直接使用系统 TabView 底栏（不再用自绘悬浮底栏替代），
+    // 仅 iOS 26 的 tab accessory 路径会显示迷你播放器；老系统通过 safeAreaInset 叠加。
+    var hidesSystemTabBarOnLegacy = false
     var onHomeLongPress: (() -> Void)?
 
     func makeCoordinator() -> Coordinator {

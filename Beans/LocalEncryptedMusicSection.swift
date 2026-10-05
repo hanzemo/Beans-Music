@@ -21,13 +21,13 @@ struct LocalEncryptedMusicSection: View {
     private var isEnglish: Bool { languageRaw == AppLanguage.english.rawValue }
 
     private var titleText: String {
-        isEnglish ? "Local Encrypted Music" : "本地加密音乐"
+        isEnglish ? "Local Music" : "本地音乐"
     }
 
     private var emptyText: String {
         isEnglish
-            ? "No local audio yet\nTap Import to add .ncm / .kgm / .vpr / .mflac / .mgg files,\nor drop files into Documents/BeansMusic"
-            : "还没有本地音乐\n点「导入」添加 .ncm / .kgm / .vpr / .mflac / .mgg 文件，\n或直接把文件放进 Documents/BeansMusic"
+            ? "No local audio yet\nTap Import to add encrypted (.ncm / .kgm / .mflac / .mgg)\nor plain (.mp3 / .m4a / .wav / .flac / .ogg) files,\nor drop files into Documents/BeansMusic"
+            : "还没有本地音乐\n点「导入」添加加密文件（.ncm / .kgm / .mflac / .mgg）\n或明文音频（.mp3 / .m4a / .wav / .flac / .ogg），\n也可以直接把文件放进 Documents/BeansMusic"
     }
 
     var body: some View {
@@ -184,7 +184,8 @@ struct LocalEncryptedMusicSection: View {
 
     private var importTypes: [UTType] {
         var types: [UTType] = []
-        for ext in ["ncm", "kgm", "vpr", "mflac", "mflac0", "mgg"] {
+        for ext in ["ncm", "kgm", "vpr", "mflac", "mflac0", "mgg",
+                    "mp3", "m4a", "wav", "flac", "aac", "ogg", "opus"] {
             if let type = UTType(filenameExtension: ext) {
                 types.append(type)
             }
@@ -199,7 +200,7 @@ struct LocalEncryptedMusicSection: View {
             var imported = 0
             let dir = library.ensureDirectories()
             for url in urls {
-                guard EncryptedAudioFormat.isEncryptedFile(url) else { continue }
+                guard LocalAudioLibrary.isAcceptedAudioFile(url) else { continue }
                 let accessing = url.startAccessingSecurityScopedResource()
                 defer { if accessing { url.stopAccessingSecurityScopedResource() } }
                 let dest = dir.appendingPathComponent(url.lastPathComponent)

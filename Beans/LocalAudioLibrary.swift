@@ -1,18 +1,24 @@
 import Foundation
 import AVFoundation
 
-/// 本机加密音乐库：扫描「本地音乐」目录、按需解密到缓存、生成可播放的 Song。
+/// 本机音乐库：扫描「本地音乐」目录、按需解密到缓存、生成可播放的 Song。
 ///
 /// 目录结构（位于 App 沙盒 Documents/BeansMusic/，开启文件共享后可手动放入文件）：
-///   Documents/BeansMusic/            用户放置加密音乐文件（.ncm/.kgm/.vpr/.mflac/.mgg）
+///   Documents/BeansMusic/            用户放置音频文件
 ///   Caches/BeansDecrypted/           解密后的临时音频（播放时生成，可随时清理）
+///
+/// 支持的文件类型：
+///   加密：.ncm / .kgm / .vpr / .mflac / .mgg / .mflac0
+///   明文：.mp3 / .m4a / .wav / .flac / .aac / .ogg / .opus
+///
+/// 文件名可含平台 ID（例如 "320000-1456890009"、"1456890009 - 320000"、"320000"），
+/// 用于日后与网易云等平台 API 同步封面/歌词。
 @MainActor
 final class LocalAudioLibrary: ObservableObject {
     static let shared = LocalAudioLibrary()
 
-    /// 目录内扫描出的本机歌曲（只反映加密文件本身，不包含解密产物）。
+    /// 目录内扫描出的本机歌曲。
     @Published private(set) var songs: [Song] = []
-    /// 是否正在扫描/解密。
     @Published private(set) var isWorking = false
     @Published private(set) var lastError: String?
 
@@ -23,19 +29,16 @@ final class LocalAudioLibrary: ObservableObject {
 
     // MARK: 目录
 
-    /// 用户放置加密音乐的目录。
     var musicDirectory: URL {
         let docs = fileManager.urls(for: .documentDirectory, in: .userDomainMask)[0]
         return docs.appendingPathComponent("BeansMusic", isDirectory: true)
     }
 
-    /// 解密产物缓存目录。
     var decryptedCacheDirectory: URL {
         let caches = fileManager.urls(for: .cachesDirectory, in: .userDomainMask)[0]
         return caches.appendingPathComponent("BeansDecrypted", isDirectory: true)
     }
 
-    /// 确保目录存在，返回音乐目录。
     @discardableResult
     func ensureDirectories() -> URL {
         try? fileManager.createDirectory(at: musicDirectory, withIntermediateDirectories: true)
@@ -43,11 +46,104 @@ final class LocalAudioLibrary: ObservableObject {
         return musicDirectory
     }
 
+    // MARK: 扩展名分类
+
+    /// 明文音频扩展名（App 直接播放，不解密）。
+    static let plainAudioExtensions: Set<String> = [
+        "mp3", "m4a", "wav", "flac", "aac", "ogg", "opus", "aiff", "caf"
+    ]
+
+    static func isAcceptedAudioFile(_ url: URL) -> Bool {
+        let ext = url.pathExtension.lowercased()
+        return EncryptedAudioFormat.isEncryptedFile(url)
+            || plainAudioExtensions.contains(ext)
+    }
+
+    // MARK: 文件名解析
+
+    /// 从文件名解析平台 ID（例如 "1456890009"）。
+    /// 规则：取所有 6 位以上连续数字中最像平台 ID 的那一个（优先最长、其次首次出现）。
+    static func parsePlatformID(fromName name: String) -> String? {
+        var best: (id: String, len: Int, idx: Int)?
+        var idx = 0
+        var cur = ""
+        for ch in name {
+            if ch.isNumber {
+                cur.append(ch)
+            } else {
+                if cur.count >= 6 {
+                    let len = cur.count
+                    if best == nil || len > best!.len || (len == best!.len && idx < best!.idx) {
+                        best = (cur, len, idx)
+                    }
+                }
+                cur = ""
+            }
+            idx += 1
+        }
+        if cur.count >= 6 {
+            let len = cur.count
+            if best == nil || len > best!.len || (len == best!.len && idx < best!.idx) {
+                best = (cur, len, idx)
+            }
+        }
+        return best?.id
+    }
+
+    /// 从文件名解析曲名 / 歌手。
+    static func parseNameAndArtist(_ raw: String) -> (name: String, artist: String, cleanedBase: String) {
+        var s = stripNumericIDs(raw)
+        let qualityTags = ["320000", "128000", "320k", "128k", "999999", "flac", "mp3", "ogg", "wav", "m4a", "aac", "lossless", "无损", "超清"]
+        for tag in qualityTags {
+            s = s.replacingOccurrences(of: tag, with: " ", options: [.caseInsensitive])
+        }
+        for sep in [" - ", " — ", "–", "-", "_", "|", "/"] {
+            s = s.replacingOccurrences(of: sep, with: " ")
+        }
+        s = s
+            .split(whereSeparator: { $0 == " " || $0 == "\t" })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        s = s.trimmingCharacters(in: .whitespaces)
+
+        if s.isEmpty {
+            return (raw, beansLocalized("未知歌手", "Unknown Artist"), s)
+        }
+        return (s, beansLocalized("未知歌手", "Unknown Artist"), s)
+    }
+
+    /// 剔除 3-6 位连续数字块（视为平台 ID 或质量码）。
+    private static func stripNumericIDs(_ s: String) -> String {
+        var result = ""
+        var cur = ""
+        var curLen = 0
+        for ch in s {
+            if ch.isNumber {
+                cur.append(ch)
+                curLen += 1
+            } else {
+                if !(curLen >= 3 && curLen <= 6), !cur.isEmpty {
+                    result += cur
+                }
+                result += ch
+                cur = ""
+                curLen = 0
+            }
+        }
+        if !(curLen >= 3 && curLen <= 6), !cur.isEmpty {
+            result += cur
+        }
+        return result
+    }
+
     // MARK: 扫描
 
-    /// 扫描「本地音乐」目录，构建 Song 列表。启动时自动调用一次。
+    /// 扫描本地音乐目录。会分派到后台线程做 ncm 元数据解析，避免主线程卡顿。
+    /// 扫描本地音乐目录。ncm 元数据在后台线程解析，避免主线程卡顿。
     func scan() {
         lastError = nil
+        isWorking = true
         let dir = ensureDirectories()
         let contents = (try? fileManager.contentsOfDirectory(
             at: dir,
@@ -55,29 +151,43 @@ final class LocalAudioLibrary: ObservableObject {
             options: [.skipsHiddenFiles]
         )) ?? []
 
-        var result: [Song] = []
-        for url in contents.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
-            guard EncryptedAudioFormat.isEncryptedFile(url) else { continue }
-            result.append(makeSong(for: url))
+        let urls = contents
+            .filter { Self.isAcceptedAudioFile($0) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        Task.detached(priority: .utility) { [weak self, urls] in
+            var metaCache: [URL: NCMFileInfo] = [:]
+            for url in urls where url.pathExtension.lowercased() == "ncm" {
+                if let info = try? EncryptedAudioDecryptor.parseNCMMeta(at: url) {
+                    metaCache[url] = info
+                }
+            }
+            let localMeta = metaCache
+            await MainActor.run {
+                guard let self else { return }
+                var result: [Song] = []
+                for url in urls {
+                    result.append(self.makeSong(for: url, ncmMeta: localMeta[url]))
+                }
+                self.songs = result
+                self.isWorking = false
+                self.didInitialScan = true
+                BeansLogger.shared.log("本地音乐扫描完成：\(result.count) 首（目录 \(dir.path)）", level: .info)
+            }
         }
-        songs = result
-        didInitialScan = true
-        BeansLogger.shared.log("本地音乐扫描完成：\(result.count) 首（目录 \(dir.path)）", level: .info)
     }
 
-    /// 首次访问时懒加载扫描（供 UI 调用，避免重复扫描）。
     func scanIfNeeded() {
         guard !didInitialScan else { return }
         scan()
     }
 
-    /// 目录变化（导入/删除文件）后调用，刷新列表并清理失效缓存。
     func refresh() {
         cleanupOrphanedCache()
         scan()
     }
 
-    /// 播放时探测到真实时长后回写到列表（不持久化，仅内存展示）。
+    /// 播放时探测到真实时长后回写到列表（仅内存）。
     func updateDuration(song: Song, duration: TimeInterval) {
         guard duration > 0, duration.isFinite else { return }
         guard let idx = songs.firstIndex(where: { $0.identityKey == song.identityKey }) else { return }
@@ -96,17 +206,36 @@ final class LocalAudioLibrary: ObservableObject {
         )
     }
 
-    /// 由加密文件构造一个 `.local` 来源的 Song。
-    private func makeSong(for url: URL) -> Song {
+    // MARK: 构造 Song
+
+    private func makeSong(for url: URL, ncmMeta: NCMFileInfo?) -> Song {
         let fileName = url.lastPathComponent
         let baseName = url.deletingPathExtension().lastPathComponent
-        // 尝试从文件名解析「歌名 - 歌手」。
-        let (name, artist) = Self.parseNameAndArtist(baseName)
-        let id = abs(fileName.hashValue)
+        let isEncrypted = EncryptedAudioFormat.isEncryptedFile(url)
+        let ext = url.pathExtension.lowercased()
+
+        let platformID = Self.parsePlatformID(fromName: fileName)
+
+        // ncm 优先从内嵌元数据回填真实歌名/歌手/时长/专辑
+        if isEncrypted, ext == "ncm", let info = ncmMeta, !info.name.isEmpty {
+            return Song(
+                id: platformID.map { Int($0) ?? abs(fileName.hashValue) } ?? abs(fileName.hashValue),
+                name: info.name,
+                artists: info.artists.isEmpty ? beansLocalized("未知歌手", "Unknown Artist") : info.artists,
+                album: info.album.isEmpty ? "本地音乐" : info.album,
+                coverURL: nil,
+                duration: Double(info.duration) / 1000.0,
+                source: .local,
+                fee: 0,
+                localFileName: fileName
+            )
+        }
+
+        let parsed = Self.parseNameAndArtist(baseName)
         return Song(
-            id: id,
-            name: name,
-            artists: artist,
+            id: platformID.map { Int($0) ?? abs(fileName.hashValue) } ?? abs(fileName.hashValue),
+            name: parsed.name.isEmpty ? baseName : parsed.name,
+            artists: parsed.artist,
             album: "本地音乐",
             coverURL: nil,
             duration: 0,
@@ -116,33 +245,19 @@ final class LocalAudioLibrary: ObservableObject {
         )
     }
 
-    /// 解析「歌名 - 歌手」「歌名_歌手」「歌名」等常见命名。
-    static func parseNameAndArtist(_ raw: String) -> (String, String) {
-        for separator in [" - ", " — ", "-", "_", "–"] {
-            if let range = raw.range(of: separator) {
-                let name = String(raw[raw.startIndex..<range.lowerBound]).trimmingCharacters(in: .whitespaces)
-                let artist = String(raw[range.upperBound...]).trimmingCharacters(in: .whitespaces)
-                if !name.isEmpty, !artist.isEmpty {
-                    return (name, artist)
-                }
-            }
-        }
-        return (raw, beansLocalized("未知歌手", "Unknown Artist"))
-    }
-
-    // MARK: 解密
+    // MARK: 播放
 
     /// 取得某首本地歌曲可直接交给 AVPlayer 的文件 URL。
-    ///
-    /// 播放时才会调用：若缓存已存在则直接复用，否则解密后写入缓存。
-    /// - 调用方应放在后台线程执行（本方法内部同步解密，可能较慢）。
+    /// 加密文件解密到缓存后返回；明文文件直接返回原路径。
     func playableURL(for song: Song) throws -> URL {
-        try Self.playableURL(for: song, musicDir: musicDirectory, cacheDir: decryptedCacheDirectory)
+        try Self.playableURL(
+            for: song,
+            musicDir: musicDirectory,
+            cacheDir: decryptedCacheDirectory
+        )
     }
 
     /// 与实例无关的解密入口：可安全地从任意线程（含 detached task）调用。
-    ///
-    /// 不依赖 `shared`（`shared` 是 `@MainActor` 隔离的），因此不会产生跨 actor 访问报错。
     nonisolated static func playableURL(for song: Song, musicDir: URL, cacheDir: URL) throws -> URL {
         guard song.source == .local, let fileName = song.localFileName else {
             throw EncryptedAudioError.malformed("非本地歌曲")
@@ -152,12 +267,18 @@ final class LocalAudioLibrary: ObservableObject {
             throw EncryptedAudioError.malformed("文件不存在：\(fileName)")
         }
 
+        // 明文音频文件：直接返回原路径。
+        let ext = sourceURL.pathExtension.lowercased()
+        guard EncryptedAudioFormat.from(fileExtension: ext) != nil else {
+            return sourceURL
+        }
+
+        // 加密文件：解密到缓存。
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
 
-        let ext = EncryptedAudioDecryptor.decryptedExtension(for: sourceURL)
-        let outURL = cacheDir.appendingPathComponent("\(abs(fileName.hashValue)).\(ext)")
+        let outExt = EncryptedAudioDecryptor.decryptedExtension(for: sourceURL)
+        let outURL = cacheDir.appendingPathComponent("\(stableHash(fileName)).\(outExt)")
 
-        // 缓存命中：源文件较新则直接用。
         if let outAttrs = try? FileManager.default.attributesOfItem(atPath: outURL.path),
            let srcAttrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
            let outDate = outAttrs[.modificationDate] as? Date,
@@ -166,7 +287,6 @@ final class LocalAudioLibrary: ObservableObject {
             return outURL
         }
 
-        // 解密并落盘。
         let data = try EncryptedAudioDecryptor.decrypt(fileAt: sourceURL)
         try? FileManager.default.removeItem(at: outURL)
         try data.write(to: outURL, options: .atomic)
@@ -183,40 +303,49 @@ final class LocalAudioLibrary: ObservableObject {
         )
     }
 
+    /// 稳定 hash（跨运行一致，避免 Swift hashValue 每次运行都变化）。
+    nonisolated static func stableHash(_ s: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in s.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return String(hash, radix: 16)
+    }
+
     // MARK: 删除 / 清理
 
-    /// 删除本机加密文件及其缓存。
     func remove(song: Song) {
         guard song.source == .local, let fileName = song.localFileName else { return }
         let sourceURL = musicDirectory.appendingPathComponent(fileName)
         try? fileManager.removeItem(at: sourceURL)
-        let cacheURL = decryptedCacheDirectory.appendingPathComponent("\(abs(fileName.hashValue))")
-        // 缓存文件名带扩展名，按前缀删除。
-        if let entries = try? fileManager.contentsOfDirectory(at: decryptedCacheDirectory, includingPropertiesForKeys: nil) {
-            for entry in entries where entry.deletingPathExtension().lastPathComponent == String(abs(fileName.hashValue)) {
-                try? fileManager.removeItem(at: entry)
-            }
-        }
-        _ = cacheURL
+        deleteCache(forFileName: fileName)
         refresh()
     }
 
-    /// 清空所有解密缓存（不删原始加密文件）。
     func clearDecryptedCache() {
         try? fileManager.removeItem(at: decryptedCacheDirectory)
         try? fileManager.createDirectory(at: decryptedCacheDirectory, withIntermediateDirectories: true)
         BeansLogger.shared.log("已清空本地音乐解密缓存", level: .info)
     }
 
-    /// 删除缓存目录中已无对应源文件的孤儿缓存。
+    private func deleteCache(forFileName fileName: String) {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: decryptedCacheDirectory, includingPropertiesForKeys: nil
+        ) else { return }
+        let prefix = Self.stableHash(fileName)
+        for entry in entries where entry.deletingPathExtension().lastPathComponent == prefix {
+            try? fileManager.removeItem(at: entry)
+        }
+    }
+
     private func cleanupOrphanedCache() {
         guard let entries = try? fileManager.contentsOfDirectory(
-            at: decryptedCacheDirectory,
-            includingPropertiesForKeys: nil
+            at: decryptedCacheDirectory, includingPropertiesForKeys: nil
         ) else { return }
         let validHashes = Set(songs.compactMap { song -> String? in
             guard let name = song.localFileName else { return nil }
-            return String(abs(name.hashValue))
+            return Self.stableHash(name)
         })
         for entry in entries where !validHashes.contains(entry.deletingPathExtension().lastPathComponent) {
             try? fileManager.removeItem(at: entry)
