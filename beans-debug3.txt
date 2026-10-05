@@ -1,0 +1,113 @@
+===== makeSong 完整 =====
+            localFileName: old.localFileName
+        )
+    }
+
+    // MARK: 构造 Song
+
+    private func makeSong(for url: URL, ncmMeta: NCMFileInfo?) -> Song {
+        let fileName = url.lastPathComponent
+        let baseName = url.deletingPathExtension().lastPathComponent
+        let isEncrypted = EncryptedAudioFormat.isEncryptedFile(url)
+        let ext = url.pathExtension.lowercased()
+
+        let platformID = Self.parsePlatformID(fromName: fileName)
+
+        // ncm 优先从内嵌元数据回填真实歌名/歌手/时长/专辑
+        if isEncrypted, ext == "ncm", let info = ncmMeta, !info.name.isEmpty {
+            return Song(
+                id: platformID.map { Int($0) ?? abs(fileName.hashValue) } ?? abs(fileName.hashValue),
+                name: info.name,
+                artists: info.artists.isEmpty ? beansLocalized("未知歌手", "Unknown Artist") : info.artists,
+                album: info.album.isEmpty ? "本地音乐" : info.album,
+                coverURL: nil,
+                duration: Double(info.duration) / 1000.0,
+                source: .local,
+                fee: 0,
+                localFileName: fileName
+            )
+        }
+
+        let parsed = Self.parseNameAndArtist(baseName)
+        return Song(
+            id: platformID.map { Int($0) ?? abs(fileName.hashValue) } ?? abs(fileName.hashValue),
+            name: parsed.name.isEmpty ? baseName : parsed.name,
+            artists: parsed.artist,
+            album: "本地音乐",
+            coverURL: nil,
+            duration: 0,
+            source: .local,
+            fee: 0,
+            localFileName: fileName
+        )
+    }
+
+    // MARK: 播放
+
+    /// 取得某首本地歌曲可直接交给 AVPlayer 的文件 URL。
+
+===== 加载入口 =====
+            includingPropertiesForKeys: [.isRegularFileKey, .fileSizeKey],
+            options: [.skipsHiddenFiles]
+        )) ?? []
+
+        let urls = contents
+            .filter { Self.isAcceptedAudioFile($0) }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+
+        Task.detached(priority: .utility) { [weak self, urls] in
+            var metaCache: [URL: NCMFileInfo] = [:]
+            for url in urls where url.pathExtension.lowercased() == "ncm" {
+                if let info = EncryptedAudioDecryptor.parseNCMMeta(at: url) {
+                    metaCache[url] = info
+                }
+            }
+            let localMeta = metaCache
+            await MainActor.run {
+                guard let self else { return }
+                var result: [Song] = []
+                for url in urls {
+                    result.append(self.makeSong(for: url, ncmMeta: localMeta[url]))
+                }
+                self.songs = result
+                self.isWorking = false
+                self.didInitialScan = true
+                BeansLogger.shared.log("本地音乐扫描完成：\(result.count) 首（目录 \(dir.path)）", level: .info)
+            }
+        }
+    }
+
+    func scanIfNeeded() {
+        guard !didInitialScan else { return }
+        scan()
+    }
+
+    func refresh() {
+        cleanupOrphanedCache()
+        scan()
+    }
+
+    /// 播放时探测到真实时长后回写到列表（仅内存）。
+    func updateDuration(song: Song, duration: TimeInterval) {
+        guard duration > 0, duration.isFinite else { return }
+        guard let idx = songs.firstIndex(where: { $0.identityKey == song.identityKey }) else { return }
+        guard abs(songs[idx].duration - duration) > 1 else { return }
+        let old = songs[idx]
+        songs[idx] = Song(
+            id: old.id,
+            name: old.name,
+            artists: old.artists,
+            album: old.album,
+            coverURL: old.coverURL,
+            duration: duration,
+            source: .local,
+            fee: 0,
+            localFileName: old.localFileName
+
+===== NetEaseAPI 有没有 songDetail / 单曲详情 =====
+
+===== 现有网络请求怎么发 =====
+8:    private let session: URLSession
+23:        let config = URLSessionConfiguration.default
+27:        session = URLSession(configuration: config)
+41:    private func request(_ uri: String, payload: [String: Any], crypto: String) async throws -> [String: Any] {

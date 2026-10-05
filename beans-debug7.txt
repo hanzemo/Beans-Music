@@ -1,0 +1,109 @@
+===== Models.swift init?(json:) =====
+
+    init?(json: [String: Any]) {
+        guard let id = json["id"] as? Int else { return nil }
+        self.id = id
+        name = json["name"] as? String ?? ""
+        let artistsArray = json["artists"] as? [[String: Any]] ?? (json["ar"] as? [[String: Any]]) ?? []
+        artists = artistsArray.compactMap { $0["name"] as? String }.joined(separator: " / ")
+        if let albumDict = json["album"] as? [String: Any] {
+            album = albumDict["name"] as? String ?? ""
+            let pic = albumDict["picUrl"] as? String ?? (albumDict["blurPicUrl"] as? String ?? "")
+            coverURL = pic.isEmpty ? nil : URL(string: pic)
+        } else if let al = json["al"] as? [String: Any] {
+            album = al["name"] as? String ?? ""
+            let pic = al["picUrl"] as? String ?? ""
+            coverURL = pic.isEmpty ? nil : URL(string: pic)
+        } else {
+            album = ""
+            coverURL = nil
+        }
+        let ms = json["duration"] as? Int ?? (json["dt"] as? Int) ?? 0
+        duration = Double(ms) / 1000.0
+        source = .netease
+        qqMid = nil
+        qqMediaMid = nil
+        kugouHash = nil
+        kugouAlbumAudioId = nil
+        kugouAlbumId = nil
+        kugouQualityHashes = nil
+        fee = json["fee"] as? Int ?? 0
+        localFileName = nil
+    }
+
+    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee, localFileName }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(Int.self, forKey: .id)
+        name = try c.decode(String.self, forKey: .name)
+        artists = try c.decodeIfPresent(String.self, forKey: .artists) ?? ""
+        album = try c.decodeIfPresent(String.self, forKey: .album) ?? ""
+        coverURL = try c.decodeIfPresent(URL.self, forKey: .coverURL)
+        duration = try c.decodeIfPresent(TimeInterval.self, forKey: .duration) ?? 0
+        source = try c.decodeIfPresent(SongSource.self, forKey: .source) ?? .netease
+        qqMid = try c.decodeIfPresent(String.self, forKey: .qqMid)
+        qqMediaMid = try c.decodeIfPresent(String.self, forKey: .qqMediaMid)
+
+===== Models.swift init(from decoder:) =====
+        qqMediaMid = try c.decodeIfPresent(String.self, forKey: .qqMediaMid)
+        kugouHash = try c.decodeIfPresent(String.self, forKey: .kugouHash)
+        kugouAlbumAudioId = try c.decodeIfPresent(String.self, forKey: .kugouAlbumAudioId)
+        kugouAlbumId = try c.decodeIfPresent(String.self, forKey: .kugouAlbumId)
+        kugouQualityHashes = try c.decodeIfPresent([String: String].self, forKey: .kugouQualityHashes)
+        fee = try c.decodeIfPresent(Int.self, forKey: .fee) ?? 0
+        localFileName = try c.decodeIfPresent(String.self, forKey: .localFileName)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(artists, forKey: .artists)
+        try c.encode(album, forKey: .album)
+        try c.encodeIfPresent(coverURL, forKey: .coverURL)
+        try c.encode(duration, forKey: .duration)
+        try c.encode(source, forKey: .source)
+        try c.encodeIfPresent(qqMid, forKey: .qqMid)
+        try c.encodeIfPresent(qqMediaMid, forKey: .qqMediaMid)
+        try c.encodeIfPresent(kugouHash, forKey: .kugouHash)
+        try c.encodeIfPresent(kugouAlbumAudioId, forKey: .kugouAlbumAudioId)
+        try c.encodeIfPresent(kugouAlbumId, forKey: .kugouAlbumId)
+        try c.encodeIfPresent(kugouQualityHashes, forKey: .kugouQualityHashes)
+        try c.encode(fee, forKey: .fee)
+        try c.encodeIfPresent(localFileName, forKey: .localFileName)
+    }
+}
+
+/// 歌手搜索结果（网易云 / QQ音乐通用）
+struct Artist: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let coverURL: URL?
+    let source: SongSource
+}
+
+/// 专辑搜索结果（网易云 / QQ音乐通用）
+struct Album: Identifiable, Hashable {
+    let id: String
+    let name: String
+    let artistName: String
+    let coverURL: URL?
+    let source: SongSource
+    var trackCount: Int?
+}
+
+struct Playlist: Identifiable, Hashable, Codable {
+    let id: Int
+    let name: String
+    var coverURL: URL?
+    let trackCount: Int
+    let creatorName: String
+    let specialType: Int
+    /// 歌单来源（网易云 / QQ音乐），非网易云歌单用对应接口加载
+    let source: SongSource
+
+    init(id: Int, name: String, coverURL: URL?, trackCount: Int = 0, source: SongSource = .netease) {
+        self.id = id
+        self.name = name
+        self.coverURL = coverURL

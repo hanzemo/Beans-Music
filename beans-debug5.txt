@@ -1,0 +1,89 @@
+===== Song 完整声明 159-200 =====
+struct Song: Identifiable, Hashable, Codable {
+    let id: Int
+    let name: String
+    let artists: String
+    let album: String
+    let coverURL: URL?
+    let duration: TimeInterval
+    /// 歌曲来源（网易云 / QQ音乐）
+    let source: SongSource
+    /// QQ 音乐 songmid（source == .qq 时用于获取播放地址与歌词）
+    let qqMid: String?
+    /// QQ 音乐音频文件 media_mid；部分歌曲与 songmid 不同，取 vkey 时必须优先使用
+    let qqMediaMid: String?
+    /// 酷狗音乐文件 hash 与专辑音频 id（source == .kugou 时用于获取播放地址与歌词）
+    let kugouHash: String?
+    let kugouAlbumAudioId: String?
+    let kugouAlbumId: String?
+    let kugouQualityHashes: [String: String]?
+    /// 付费/VIP 标记（网易云：0 免费、1 VIP、4 付费单曲；QQ：0 免费、非 0 付费）
+    let fee: Int
+    /// 本机加密音乐文件名（仅 source == .local 时有效，相对「本地音乐」目录）
+    let localFileName: String?
+
+    var formattedDuration: String {
+        let total = max(0, Int(duration))
+        return String(format: "%d:%02d", total / 60, total % 60)
+    }
+
+    /// 跨平台唯一标识（避免网易云与 QQ 音乐歌曲 id 撞车）
+    var identityKey: String {
+        switch source {
+        case .qq: return "qq-\(id)"
+        case .kugou: return "kugou-\(id)"
+        case .netease: return "netease-\(id)"
+        case .local: return "local-\(localFileName ?? String(id))"
+        }
+    }
+
+    /// 是否为 VIP / 付费歌曲（用于列表与播放器角标）
+    /// 网易云 fee：0 免费、1 VIP、4 付费单曲；8 为翻唱/免费资源，不视为 VIP
+    /// QQ payplay：0 免费，非 0 需要会员/付费
+    var isVIP: Bool {
+
+===== NetEaseAPI 里 JSON -> Song 的方法 =====
+414:                guard let song = Song(json: item), seen.insert(song.identityKey).inserted else { continue }
+453:        return list.compactMap { Song(json: $0) }
+468:            guard let songJSON = item["song"] as? [String: Any], let song = Song(json: songJSON) else { return nil }
+575:            if let songJSON = item["song"] as? [String: Any], let song = Song(json: songJSON) {
+577:            } else if let song = Song(json: item) {
+611:                return Song(json: songInfo)
+613:            return Song(json: item)
+
+===== NetEaseAPI.playlistTracks 实现 =====
+    func playlistTracks(id: Int) async throws -> [Song] {
+        let json = try await request("/api/v6/playlist/detail", payload: ["id": id, "n": 100000, "s": 8], crypto: "eapi")
+        let playlist = json["playlist"] as? [String: Any] ?? [:]
+        let tracks = playlist["tracks"] as? [[String: Any]] ?? []
+        return tracks.compactMap(Song.init(json:))
+    }
+
+    func songURLs(ids: [Int], level: String = "standard") async throws -> [Int: String] {
+        let idsString = "[" + ids.map(String.init).joined(separator: ",") + "]"
+        let json = try await request("/api/song/enhance/player/url/v1", payload: ["ids": idsString, "level": level, "encodeType": "flac"], crypto: "eapi")
+        let data = json["data"] as? [[String: Any]] ?? []
+        var result: [Int: String] = [:]
+        for item in data {
+            if let id = item["id"] as? Int, let url = item["url"] as? String, !url.isEmpty {
+                result[id] = url
+            }
+        }
+        return result
+    }
+
+    /// 歌曲播放地址 + 试听标记（用于灰色/VIP 歌曲解锁判断）
+    struct SongURLInfo {
+        let url: String?
+        /// 存在 freeTrialInfo 表示仅返回试听片段（VIP 歌曲）
+        let freeTrial: Bool
+    }
+
+    func songURLInfo(ids: [Int], level: String = "standard") async throws -> [Int: SongURLInfo] {
+        let idsString = "[" + ids.map(String.init).joined(separator: ",") + "]"
+        let json = try await request("/api/song/enhance/player/url/v1", payload: ["ids": idsString, "level": level, "encodeType": "flac"], crypto: "eapi")
+        let data = json["data"] as? [[String: Any]] ?? []
+        var result: [Int: SongURLInfo] = [:]
+
+===== 确认 1456890009 是网易云 id（可选，本地验证）=====
+浏览器打开 https://music.163.com/song?id=1456890009 看歌名

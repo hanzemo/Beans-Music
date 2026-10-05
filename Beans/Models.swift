@@ -235,7 +235,7 @@ struct Song: Identifiable, Hashable, Codable {
         }
     }
 
-    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0, localFileName: String? = nil) {
+    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0, localFileName: String? = nil, linkedNeteaseID: Int? = nil) {
         self.id = id
         self.name = name
         self.artists = artists
@@ -251,6 +251,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.kugouQualityHashes = kugouQualityHashes
         self.fee = fee
         self.localFileName = localFileName
+        self.linkedNeteaseID = linkedNeteaseID
     }
 
     init?(json: [String: Any]) {
@@ -282,9 +283,10 @@ struct Song: Identifiable, Hashable, Codable {
         kugouQualityHashes = nil
         fee = json["fee"] as? Int ?? 0
         localFileName = nil
+        linkedNeteaseID = nil
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee, localFileName }
+    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee, localFileName, linkedNeteaseID }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -303,6 +305,7 @@ struct Song: Identifiable, Hashable, Codable {
         kugouQualityHashes = try c.decodeIfPresent([String: String].self, forKey: .kugouQualityHashes)
         fee = try c.decodeIfPresent(Int.self, forKey: .fee) ?? 0
         localFileName = try c.decodeIfPresent(String.self, forKey: .localFileName)
+        linkedNeteaseID = try c.decodeIfPresent(Int.self, forKey: .linkedNeteaseID)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -322,6 +325,7 @@ struct Song: Identifiable, Hashable, Codable {
         try c.encodeIfPresent(kugouQualityHashes, forKey: .kugouQualityHashes)
         try c.encode(fee, forKey: .fee)
         try c.encodeIfPresent(localFileName, forKey: .localFileName)
+        try c.encodeIfPresent(linkedNeteaseID, forKey: .linkedNeteaseID)
     }
 }
 

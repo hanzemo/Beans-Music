@@ -1,0 +1,253 @@
+===== NetEaseAPI 前 130 行 =====
+import Foundation
+
+final class NetEaseAPI {
+    static let shared = NetEaseAPI()
+
+    private let domain = "https://music.163.com"
+    private let apiDomain = "https://interface.music.163.com"
+    private let session: URLSession
+
+    // 模拟 PC 客户端环境（与 NeteaseCloudMusicApi 一致）
+    private let os = "pc"
+    private let appver = "3.1.17.204416"
+    private let osver = "Microsoft-Windows-10-Professional-build-19045-64bit"
+    private let channel = "netease"
+
+    private let nuid: String
+    private let deviceId: String
+    private let wnMcid: String
+    private let cookiesKey = "beans.netease.cookies"
+    private var storedCookies: [String: String] = [:]
+
+    init() {
+        let config = URLSessionConfiguration.default
+        config.httpCookieAcceptPolicy = .never
+        config.httpShouldSetCookies = false
+        config.timeoutIntervalForRequest = 20
+        session = URLSession(configuration: config)
+
+        nuid = Self.randomHex(length: 32)      // 64 位 hex
+        deviceId = Self.randomHex(length: 26)  // 52 位 hex
+        wnMcid = "\(Self.randomLowercase(6)).\(Int(Date().timeIntervalSince1970 * 1000)).01.0"
+
+        if let data = UserDefaults.standard.data(forKey: cookiesKey),
+           let saved = try? JSONDecoder().decode([String: String].self, from: data) {
+            storedCookies = saved
+        }
+    }
+
+    // MARK: - 请求
+
+    private func request(_ uri: String, payload: [String: Any], crypto: String) async throws -> [String: Any] {
+        let url: URL
+        let form: String
+        var request: URLRequest
+
+        if crypto == "weapi" {
+            guard let parsed = URL(string: domain + "/weapi" + uri.dropFirst(4)) else { throw NetEaseError.unknown("请求地址无效") }
+            url = parsed
+            var data = payload
+            data["csrf_token"] = csrfToken
+            let enc = NetEaseCrypto.weapi(data)
+            form = "params=\(formEncode(enc["params"] ?? ""))&encSecKey=\(formEncode(enc["encSecKey"] ?? ""))"
+            request = URLRequest(url: url)
+            request.setValue(weapiCookieHeader(), forHTTPHeaderField: "Cookie")
+            request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36 Edg/124.0.0.0", forHTTPHeaderField: "User-Agent")
+            request.setValue(domain, forHTTPHeaderField: "Referer")
+        } else {
+            guard let parsed = URL(string: apiDomain + "/eapi" + uri.dropFirst(4)) else { throw NetEaseError.unknown("请求地址无效") }
+            url = parsed
+            let header = eapiHeader()
+            var data = payload
+            data["e_r"] = false
+            data["header"] = header
+            let enc = NetEaseCrypto.eapi(data, path: uri)
+            form = "params=\(formEncode(enc["params"] ?? ""))"
+            request = URLRequest(url: url)
+            request.setValue(eapiCookieHeader(header: header), forHTTPHeaderField: "Cookie")
+            request.setValue("NeteaseMusic 9.0.90/5038 (iPhone; iOS 16.2; zh_CN)", forHTTPHeaderField: "User-Agent")
+        }
+
+        request.httpMethod = "POST"
+        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(form.utf8)
+
+        let (data, response) = try await session.data(for: request)
+        guard let http = response as? HTTPURLResponse else { throw NetEaseError.network }
+        storeCookies(from: http)
+        guard http.statusCode == 200 else {
+            let snippet = String(data: data, encoding: .utf8)?.prefix(120) ?? ""
+            throw NetEaseError.httpStatus(http.statusCode, String(snippet))
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            let snippet = String(data: data, encoding: .utf8)?.prefix(120) ?? ""
+            throw NetEaseError.decoding(String(snippet))
+        }
+        return json
+    }
+
+    private func formEncode(_ string: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return string.addingPercentEncoding(withAllowedCharacters: allowed) ?? string
+    }
+
+    // MARK: - Cookie 构造
+
+    private var csrfToken: String {
+        cookieValue(named: "__csrf")
+    }
+
+    private var musicU: String {
+        cookieValue(named: "MUSIC_U")
+    }
+
+    private func cookieValue(named name: String) -> String {
+        storedCookies[name] ?? ""
+    }
+
+    func clearCookies() {
+        storedCookies.removeAll()
+        UserDefaults.standard.removeObject(forKey: cookiesKey)
+    }
+
+    /// 应用内网页登录：将 WKWebView 中 music.163.com 的 Cookie 合并进登录态并持久化
+    func importWebCookies(_ cookies: [String: String]) {
+        var changed = false
+        for (key, value) in cookies where !value.isEmpty {
+            if storedCookies[key] != value {
+                storedCookies[key] = value
+                changed = true
+            }
+        }
+        if changed, let data = try? JSONEncoder().encode(storedCookies) {
+            UserDefaults.standard.set(data, forKey: cookiesKey)
+        }
+    }
+
+    private func storeCookies(from response: HTTPURLResponse) {
+        var changed = false
+        for (key, value) in response.allHeaderFields {
+
+===== NetEaseAPI 所有 public 方法 =====
+41:    private func request(_ uri: String, payload: [String: Any], crypto: String) async throws -> [String: Any] {
+89:    private func formEncode(_ string: String) -> String {
+105:    private func cookieValue(named name: String) -> String {
+109:    func clearCookies() {
+115:    func importWebCookies(_ cookies: [String: String]) {
+128:    private func storeCookies(from response: HTTPURLResponse) {
+150:    private func weapiCookieHeader() -> String {
+170:    private func eapiHeader() -> [String: String] {
+190:    private func eapiCookieHeader(header: [String: String]) -> String {
+195:    private static func randomHex(length: Int) -> String {
+200:    private static func randomLowercase(_ count: Int) -> String {
+207:    func qrKey() async throws -> String {
+215:    private func qrKeyEAPI() async throws -> String {
+222:    private func qrKeyWEAPI() async throws -> String {
+229:    func qrLoginURL(key: String) -> String {
+233:    func qrCheck(key: String) async throws -> Int {
+243:    func account() async throws -> NetEaseUser {
+253:    func userPlaylists(uid: Int) async throws -> [Playlist] {
+259:    func playlistTracks(id: Int) async throws -> [Song] {
+266:    func songURLs(ids: [Int], level: String = "standard") async throws -> [Int: String] {
+286:    func songURLInfo(ids: [Int], level: String = "standard") async throws -> [Int: SongURLInfo] {
+303:    func lyric(id: Int) async throws -> String? {
+312:    func lyricWithTranslation(id: Int) async throws -> (lrc: String?, tlyric: String?) {
+328:    func songComments(id: Int, limit: Int = 30, offset: Int = 0) async throws -> SongCommentPage {
+338:    func search(keyword: String, limit: Int = 30, offset: Int = 0) async throws -> [Song] {
+346:    func searchArtists(keyword: String, limit: Int = 30) async throws -> [Artist] {
+365:    func searchAlbums(keyword: String, limit: Int = 30) async throws -> [Album] {
+389:    func artistHotSongs(artistID: Int, limit: Int = 120) async throws -> [Song] {
+429:    func artistAlbums(artistID: Int, limit: Int = 50) async throws -> [Album] {
+450:    func albumSongs(albumID: Int) async throws -> [Song] {
+460:    func playRecord(uid: Int, type: Int) async throws -> PlayRecordResult {
+475:    func like(id: Int, liked: Bool) async throws -> Bool {
+503:    func topLists() async throws -> [TopList] {
+509:    func dailyRecommend() async throws -> [Song] {
+517:    func playlistSquare(cat: String = "全部", order: String = "hot", limit: Int = 12) async throws -> [Playlist] {
+524:    func highQualityPlaylists(cat: String = "全部", limit: Int = 18) async throws -> [Playlist] {
+531:    func playlistCatlist() async -> [String] {
+537:    func personalizedPlaylists(limit: Int = 20) async throws -> [Playlist] {
+543:    func recommendResource() async throws -> [Playlist] {
+549:    func recommendedHomePlaylists(loggedIn: Bool, limit: Int = 18) async -> [Playlist] {
+563:    func hotSearch() async throws -> [String] {
+570:    func newSongs(limit: Int = 10) async throws -> [Song] {
+584:    func topPlaylists(limit: Int = 10) async throws -> [Playlist] {
+590:    func simiSongs(id: Int) async throws -> [Song] {
+596:    func intelligenceList(songID: Int, playlistID: Int, count: Int = 30) async throws -> [Song] {
+618:    func personalFM(limit: Int = 30) async throws -> [Song] {
+637:    func createPlaylist(name: String) async throws -> Int {
+645:    func addToPlaylist(playlistID: Int, songIDs: [Int]) async throws -> Bool {
+651:    func removeFromPlaylist(playlistID: Int, songIDs: [Int]) async throws -> Bool {
+657:    func deletePlaylist(id: Int) async throws -> Bool {
+
+===== parsePlatformID 实现 =====
+66:    static func parsePlatformID(fromName name: String) -> String? {
+67-        var best: (id: String, len: Int, idx: Int)?
+68-        var idx = 0
+69-        var cur = ""
+70-        for ch in name {
+71-            if ch.isNumber {
+72-                cur.append(ch)
+73-            } else {
+74-                if cur.count >= 6 {
+75-                    let len = cur.count
+76-                    if best == nil || len > best!.len || (len == best!.len && idx < best!.idx) {
+77-                        best = (cur, len, idx)
+78-                    }
+79-                }
+80-                cur = ""
+81-            }
+82-            idx += 1
+83-        }
+84-        if cur.count >= 6 {
+85-            let len = cur.count
+86-            if best == nil || len > best!.len || (len == best!.len && idx < best!.idx) {
+87-                best = (cur, len, idx)
+88-            }
+89-        }
+90-        return best?.id
+91-    }
+92-
+93-    /// 从文件名解析曲名 / 歌手。
+94-    static func parseNameAndArtist(_ raw: String) -> (name: String, artist: String, cleanedBase: String) {
+95-        var s = stripNumericIDs(raw)
+96-        let qualityTags = ["320000", "128000", "320k", "128k", "999999", "flac", "mp3", "ogg", "wav", "m4a", "aac", "lossless", "无损", "超清"]
+--
+217:        let platformID = Self.parsePlatformID(fromName: fileName)
+218-
+219-        // ncm 优先从内嵌元数据回填真实歌名/歌手/时长/专辑
+220-        if isEncrypted, ext == "ncm", let info = ncmMeta, !info.name.isEmpty {
+221-            return Song(
+222-                id: platformID.map { Int($0) ?? abs(fileName.hashValue) } ?? abs(fileName.hashValue),
+223-                name: info.name,
+224-                artists: info.artists.isEmpty ? beansLocalized("未知歌手", "Unknown Artist") : info.artists,
+225-                album: info.album.isEmpty ? "本地音乐" : info.album,
+226-                coverURL: nil,
+227-                duration: Double(info.duration) / 1000.0,
+228-                source: .local,
+229-                fee: 0,
+230-                localFileName: fileName
+231-            )
+232-        }
+233-
+234-        let parsed = Self.parseNameAndArtist(baseName)
+235-        return Song(
+236-            id: platformID.map { Int($0) ?? abs(fileName.hashValue) } ?? abs(fileName.hashValue),
+237-            name: parsed.name.isEmpty ? baseName : parsed.name,
+238-            artists: parsed.artist,
+239-            album: "本地音乐",
+240-            coverURL: nil,
+241-            duration: 0,
+242-            source: .local,
+243-            fee: 0,
+244-            localFileName: fileName
+
+===== Song 有没有便捷 copy 方法 =====
+
+===== 本地音乐怎么播放（判断 source == .local 后走哪）=====
+477:        if song.source == .local {
+980:        BeansLogger.shared.log("▶ 开始播放本地加密音乐：\(song.name) - \(song.artists)｜文件=\(song.localFileName ?? "?")", level: .info)
+1456:        case .local:
+1633:        case .local:

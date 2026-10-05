@@ -1,0 +1,300 @@
+===== 1. EncryptedAudio.swift 解密/元数据相关 =====
+68:struct NCMFileInfo: Sendable {
+99:            return try decryptNCM(raw)
+101:            return try decryptKugou(raw)
+103:            return try decryptQQ(raw)
+113:    static func parseNCMMeta(at url: URL) -> NCMFileInfo? {
+138:    ///   5. 读 meta_len(4) + meta(N) —— 可解析出歌名/歌手/时长/封面（可选，见 parseNCMMeta）
+143:    private static func decryptNCM(_ data: Data) throws -> Data {
+181:        // meta_data（可跳过）
+182:        guard let metaLen = readU32(bytes, &pos), metaLen >= 0,
+183:              pos + metaLen <= bytes.count else {
+186:        pos += metaLen
+292:    static func parseNCMMeta(_ data: Data) throws -> NCMFileInfo {
+302:        guard let metaLen = readU32(bytes, &pos), pos + metaLen <= bytes.count else {
+305:        var modifyData = Array(bytes[pos..<(pos + metaLen)])
+306:        pos += metaLen
+326:        var info = NCMFileInfo()
+342:    private static func decryptKugou(_ data: Data) throws -> Data {
+381:    private static func decryptQQ(_ data: Data) throws -> Data {
+
+===== 2. beansDecryptCacheVersion 当前值 =====
+Beans/LocalAudioLibrary.swift:285:        let outURL = cacheDir.appendingPathComponent("\(beansDecryptCacheVersion)_\(hash).\(outExt)")
+Beans/LocalAudioLibrary.swift:359:            if stem == hash || stem == "\(beansDecryptCacheVersion)_\(hash)" {
+Beans/LocalAudioLibrary.swift:376:            let baseHash = stem.hasPrefix(beansDecryptCacheVersion + "_")
+Beans/LocalAudioLibrary.swift:377:                ? String(stem.dropFirst(beansDecryptCacheVersion.count + 1))
+Beans/EncryptedAudio.swift:87:let beansDecryptCacheVersion = "v2"
+
+===== 3. LocalAudioLibrary.swift 回填 Song / cover =====
+159:            var metaCache: [URL: NCMFileInfo] = [:]
+170:                    result.append(self.makeSong(for: url, ncmMeta: localMeta[url]))
+196:        songs[idx] = Song(
+201:            coverURL: old.coverURL,
+211:    private func makeSong(for url: URL, ncmMeta: NCMFileInfo?) -> Song {
+221:            return Song(
+226:                coverURL: nil,
+235:        return Song(
+240:            coverURL: nil,
+
+===== 4. Models.swift Song 结构 =====
+159:struct Song: Identifiable, Hashable, Codable {
+160-    let id: Int
+161-    let name: String
+162-    let artists: String
+163-    let album: String
+164-    let coverURL: URL?
+165-    let duration: TimeInterval
+166-    /// 歌曲来源（网易云 / QQ音乐）
+167-    let source: SongSource
+168-    /// QQ 音乐 songmid（source == .qq 时用于获取播放地址与歌词）
+169-    let qqMid: String?
+170-    /// QQ 音乐音频文件 media_mid；部分歌曲与 songmid 不同，取 vkey 时必须优先使用
+171-    let qqMediaMid: String?
+172-    /// 酷狗音乐文件 hash 与专辑音频 id（source == .kugou 时用于获取播放地址与歌词）
+173-    let kugouHash: String?
+174-    let kugouAlbumAudioId: String?
+175-    let kugouAlbumId: String?
+176-    let kugouQualityHashes: [String: String]?
+177-    /// 付费/VIP 标记（网易云：0 免费、1 VIP、4 付费单曲；QQ：0 免费、非 0 付费）
+178-    let fee: Int
+179-    /// 本机加密音乐文件名（仅 source == .local 时有效，相对「本地音乐」目录）
+180-    let localFileName: String?
+181-
+182-    var formattedDuration: String {
+183-        let total = max(0, Int(duration))
+184-        return String(format: "%d:%02d", total / 60, total % 60)
+185-    }
+186-
+187-    /// 跨平台唯一标识（避免网易云与 QQ 音乐歌曲 id 撞车）
+188-    var identityKey: String {
+189-        switch source {
+190-        case .qq: return "qq-\(id)"
+191-        case .kugou: return "kugou-\(id)"
+192-        case .netease: return "netease-\(id)"
+193-        case .local: return "local-\(localFileName ?? String(id))"
+194-        }
+195-    }
+196-
+197-    /// 是否为 VIP / 付费歌曲（用于列表与播放器角标）
+198-    /// 网易云 fee：0 免费、1 VIP、4 付费单曲；8 为翻唱/免费资源，不视为 VIP
+199-    /// QQ payplay：0 免费，非 0 需要会员/付费
+--
+554:struct SongComment: Identifiable, Hashable {
+555-    let id: Int
+556-    let content: String
+557-    let nickname: String
+558-    let avatarURL: URL?
+559-    let time: Date
+560-    let likedCount: Int
+561-    let isHot: Bool
+562-
+563-    init(id: Int, content: String, nickname: String, avatarURL: URL?, time: Date, likedCount: Int, isHot: Bool = false) {
+564-        self.id = id
+565-        self.content = content
+566-        self.nickname = nickname
+567-        self.avatarURL = avatarURL
+568-        self.time = time
+569-        self.likedCount = likedCount
+570-        self.isHot = isHot
+571-    }
+572-
+573-    init?(json: [String: Any], isHot: Bool = false) {
+574-        guard let id = json["commentId"] as? Int else { return nil }
+575-        self.id = id
+576-        content = json["content"] as? String ?? ""
+577-        let user = json["user"] as? [String: Any]
+578-        nickname = user?["nickname"] as? String ?? ""
+579-        let avatar = user?["avatarUrl"] as? String ?? ""
+580-        avatarURL = avatar.isEmpty ? nil : URL(string: avatar)
+581-        let ms = json["time"] as? Int ?? 0
+582-        time = Date(timeIntervalSince1970: Double(ms) / 1000.0)
+583-        likedCount = json["likedCount"] as? Int ?? 0
+584-        self.isHot = isHot
+585-    }
+586-}
+
+===== 5. LocalLibraryStore.swift 入库/持久化 =====
+33:        didSet { save() }
+82:    func addSong(_ song: Song, to id: UUID) {
+92:            addSong(song, to: id)
+98:    func containsSong(_ song: Song?) -> Bool {
+107:        addSong(song, to: playlist.id)
+121:        for song in songs { addSong(song, to: target.id) }
+125:    func removeSong(playlistID: UUID, songIdentity: String) {
+141:    private func save() {
+
+===== 6. EncryptedAudio.swift 第 80-140 行 =====
+// 用于缓存文件名前缀，避免新算法装包后仍读到旧缓存。
+
+/// 加密音乐解密统一入口。
+///
+/// 所有方法都是纯计算 + 文件 IO，不依赖任何网络，可在后台线程调用。
+/// 缓存版本前缀：任何影响解密输出字节的改动都要 +1。
+/// 用于缓存文件名前缀，避免新算法装包后仍读到旧缓存。
+let beansDecryptCacheVersion = "v2"
+
+enum EncryptedAudioDecryptor {
+
+    /// 解密给定文件并返回解密后音频的**字节数据**。
+    static func decrypt(fileAt url: URL) throws -> Data {
+        guard let format = EncryptedAudioFormat.from(fileExtension: url.pathExtension) else {
+            throw EncryptedAudioError.unsupported
+        }
+        let raw = try Data(contentsOf: url, options: .mappedIfSafe)
+        switch format {
+        case .ncm:
+            return try decryptNCM(raw)
+        case .kgm, .vpr:
+            return try decryptKugou(raw)
+        case .mflac, .mflac0, .mgg:
+            return try decryptQQ(raw)
+        }
+    }
+
+    static func decryptedExtension(for url: URL) -> String {
+        EncryptedAudioFormat.from(fileExtension: url.pathExtension)?.decryptedExtension ?? "mp3"
+    }
+
+    /// 若文件是 ncm，尝试解析内嵌元数据（用于完善曲名/歌手/时长/封面等）。
+    /// 失败不抛错，直接返回 nil，调用方回退到文件名解析。
+    static func parseNCMMeta(at url: URL) -> NCMFileInfo? {
+        guard url.pathExtension.lowercased() == "ncm" else { return nil }
+        guard let raw = try? Data(contentsOf: url, options: .mappedIfSafe) else { return nil }
+        return try? parseNCMMeta(raw)
+    }
+
+    // MARK: 网易云 .ncm
+
+    /// NCM 固定核心密钥（AES-128-ECB）——用于解密 key_data。
+    private static let ncmCoreKey: [UInt8] = [
+        0x68, 0x7A, 0x48, 0x52, 0x41, 0x6D, 0x73, 0x6F,
+        0x35, 0x6B, 0x49, 0x6E, 0x62, 0x61, 0x78, 0x57
+    ]
+
+    /// NCM 固定修改密钥（AES-128-ECB）——用于解密 modify_data（元数据 JSON）。
+    private static let ncmModifyKey: [UInt8] = [
+        0x23, 0x31, 0x34, 0x6C, 0x6A, 0x6B, 0x5F, 0x21,
+        0x5C, 0x5D, 0x26, 0x30, 0x55, 0x3C, 0x27, 0x28
+    ]
+
+    /// NCM 解密流程（对齐 taurusxin/ncmdump）：
+    ///   1. 校验 8 字节魔数 "CTENFDAM"
+    ///   2. skip 2 字节版本
+    ///   3. 读 key_data_len(4) + key_data(N)，key_data 每字节 XOR 0x64
+    ///   4. AES-ECB-Decrypt(core_key, key_data) → 去 PKCS#7 padding → 取 [17:] 为 keyBox 材料
+    ///   5. 读 meta_len(4) + meta(N) —— 可解析出歌名/歌手/时长/封面（可选，见 parseNCMMeta）
+    ///   6. skip 5 字节（4 字节 CRC + 1 字节 image version）
+    ///   7. 读 cover_frame_len(4) + image_len(4) + image(image_len) + skip(cover_frame_len - image_len)
+
+===== 7. LocalAudioLibrary.swift 第 270-380 行 =====
+        guard FileManager.default.fileExists(atPath: sourceURL.path) else {
+            throw EncryptedAudioError.malformed("文件不存在：\(fileName)")
+        }
+
+        // 明文音频文件：直接返回原路径。
+        let ext = sourceURL.pathExtension.lowercased()
+        guard EncryptedAudioFormat.from(fileExtension: ext) != nil else {
+            return sourceURL
+        }
+
+        // 加密文件：解密到缓存。
+        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+
+        let outExt = EncryptedAudioDecryptor.decryptedExtension(for: sourceURL)
+        let hash = stableHash(fileName)
+        let outURL = cacheDir.appendingPathComponent("\(beansDecryptCacheVersion)_\(hash).\(outExt)")
+
+        if let outAttrs = try? FileManager.default.attributesOfItem(atPath: outURL.path),
+           let srcAttrs = try? FileManager.default.attributesOfItem(atPath: sourceURL.path),
+           let outDate = outAttrs[.modificationDate] as? Date,
+           let srcDate = srcAttrs[.modificationDate] as? Date,
+           outDate >= srcDate {
+            return outURL
+        }
+
+        let data = try EncryptedAudioDecryptor.decrypt(fileAt: sourceURL)
+        // 校验解密结果是否包含合理的音频签名（ID3 / fLaC / OggS / MP3 帧头），
+        // 便于诊断解密是否正确。签名无效但文件仍会写出，方便用户回包排查。
+        let sig = [UInt8](data.prefix(4))
+        let hasValidSig = (sig.count >= 3 && sig[0] == 0x49 && sig[1] == 0x44 && sig[2] == 0x33)  // ID3
+            || (sig.count >= 4 && sig[0] == 0x66 && sig[1] == 0x4C && sig[2] == 0x61 && sig[3] == 0x43)  // fLaC
+            || (sig.count >= 4 && sig[0] == 0x4F && sig[1] == 0x67 && sig[2] == 0x67 && sig[3] == 0x53)  // OggS
+            || (sig.count >= 2 && sig[0] == 0xFF && (sig[1] & 0xE0) == 0xE0)  // MP3 帧
+        let sigHex = sig.prefix(8).map { String(format: "%02x", $0) }.joined()
+        BeansLogger.shared.log(
+            "本地音乐解密完成：\(fileName) → \(outURL.lastPathComponent)（\(data.count) 字节｜签名有效=\(hasValidSig)｜前8B=\(sigHex)）",
+            level: .info
+        )
+        if !hasValidSig {
+            BeansLogger.shared.log("⚠️ 解密产物缺少音频签名，可能是解密失败（文件仍写出，供排查）", level: .error)
+        }
+        try? FileManager.default.removeItem(at: outURL)
+        try data.write(to: outURL, options: .atomic)
+        return outURL
+    }
+
+    /// 供后台线程调用的便捷解密入口（读取默认目录，不触碰实例状态）。
+    nonisolated static func decryptToCache(song: Song) throws -> URL {
+        try playableURL(
+            for: song,
+            musicDir: musicDirectoryStatic(),
+            cacheDir: decryptedCacheDirectoryStatic()
+        )
+    }
+
+    /// 稳定 hash（跨运行一致，避免 Swift hashValue 每次运行都变化）。
+    nonisolated static func stableHash(_ s: String) -> String {
+        var hash: UInt64 = 0xcbf29ce484222325
+        for byte in s.utf8 {
+            hash ^= UInt64(byte)
+            hash = hash &* 0x100000001b3
+        }
+        return String(hash, radix: 16)
+    }
+
+    // MARK: 删除 / 清理
+
+    func remove(song: Song) {
+        guard song.source == .local, let fileName = song.localFileName else { return }
+        let sourceURL = musicDirectory.appendingPathComponent(fileName)
+        try? fileManager.removeItem(at: sourceURL)
+        deleteCache(forFileName: fileName)
+        refresh()
+    }
+
+    func clearDecryptedCache() {
+        try? fileManager.removeItem(at: decryptedCacheDirectory)
+        try? fileManager.createDirectory(at: decryptedCacheDirectory, withIntermediateDirectories: true)
+        BeansLogger.shared.log("已清空本地音乐解密缓存", level: .info)
+    }
+
+    private func deleteCache(forFileName fileName: String) {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: decryptedCacheDirectory, includingPropertiesForKeys: nil
+        ) else { return }
+        let hash = Self.stableHash(fileName)
+        for entry in entries {
+            let stem = entry.deletingPathExtension().lastPathComponent
+            // 匹配 v2_hash 或旧版 hash（不带版本前缀）
+            if stem == hash || stem == "\(beansDecryptCacheVersion)_\(hash)" {
+                try? fileManager.removeItem(at: entry)
+            }
+        }
+    }
+
+    private func cleanupOrphanedCache() {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: decryptedCacheDirectory, includingPropertiesForKeys: nil
+        ) else { return }
+        let validHashes = Set(songs.compactMap { song -> String? in
+            guard let name = song.localFileName else { return nil }
+            return Self.stableHash(name)
+        })
+        for entry in entries {
+            let stem = entry.deletingPathExtension().lastPathComponent
+            // 去掉 vN_ 前缀后再比对 hash
+            let baseHash = stem.hasPrefix(beansDecryptCacheVersion + "_")
+                ? String(stem.dropFirst(beansDecryptCacheVersion.count + 1))
+                : stem
+            if !validHashes.contains(baseHash) {
+                try? fileManager.removeItem(at: entry)
