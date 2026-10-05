@@ -126,7 +126,7 @@ final class LocalAudioLibrary: ObservableObject {
                 if !(curLen >= 3 && curLen <= 6), !cur.isEmpty {
                     result += cur
                 }
-                result += ch
+                result.append(ch)
                 cur = ""
                 curLen = 0
             }
@@ -158,7 +158,7 @@ final class LocalAudioLibrary: ObservableObject {
         Task.detached(priority: .utility) { [weak self, urls] in
             var metaCache: [URL: NCMFileInfo] = [:]
             for url in urls where url.pathExtension.lowercased() == "ncm" {
-                if let info = try? EncryptedAudioDecryptor.parseNCMMeta(at: url) {
+                if let info = EncryptedAudioDecryptor.parseNCMMeta(at: url) {
                     metaCache[url] = info
                 }
             }

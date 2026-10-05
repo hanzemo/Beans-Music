@@ -210,8 +210,10 @@ enum EncryptedAudioDecryptor {
         let encrypted = Array(bytes[audioStart..<audioEnd])
         var out = [UInt8](repeating: 0, count: encrypted.count)
         for i in 0..<encrypted.count {
-            let j = UInt8((i &+ 1) & 0xFF)
-            let inner = (keyBox[j] &+ keyBox[(keyBox[j] &+ j) & 0xFF]) & 0xFF
+            let j = Int((i &+ 1) & 0xFF)
+            let jj = Int(keyBox[j])
+            let idx2 = (jj &+ j) & 0xFF
+            let inner = (jj &+ Int(keyBox[idx2])) & 0xFF
             let k = keyBox[inner]
             out[i] = encrypted[i] ^ k
         }
@@ -283,7 +285,7 @@ enum EncryptedAudioDecryptor {
         }
         let afterEscape = Array(modifyData[22...])
 
-        guard let decoded = Data(afterEscape).base64Decoded() else {
+        guard let decoded = Data(base64Encoded: Data(afterEscape)) else {
             throw EncryptedAudioError.decryptFailed("ncm 元数据 Base64 解码失败")
         }
         guard let decrypted = try? AESECB.decryptNoPadding(Array(decoded), key: ncmModifyKey),
