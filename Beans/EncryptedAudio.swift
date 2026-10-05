@@ -328,11 +328,11 @@ enum EncryptedAudioDecryptor {
 /// 项目已在 Bridging Header 中引入 CommonCrypto，无需额外依赖。
 enum AESECB {
     static func decryptNoPadding(_ input: [UInt8], key: [UInt8]) throws -> [UInt8] {
-        try crypt(input, key: key, operation: kCCDecrypt)
+        try crypt(input, key: key, operation: Int32(kCCDecrypt))
     }
 
     static func encryptNoPadding(_ input: [UInt8], key: [UInt8]) throws -> [UInt8] {
-        try crypt(input, key: key, operation: kCCEncrypt)
+        try crypt(input, key: key, operation: Int32(kCCEncrypt))
     }
 
     private static func crypt(_ input: [UInt8], key: [UInt8], operation: Int32) throws -> [UInt8] {

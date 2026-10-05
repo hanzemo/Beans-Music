@@ -958,7 +958,7 @@ final class PlayerManager: NSObject, ObservableObject {
         Task.detached(priority: .userInitiated) { [weak self] in
             let result: Result<URL, Error>
             do {
-                let url = try LocalAudioLibrary.shared.playableURL(for: song)
+                let url = try LocalAudioLibrary.decryptToCache(song: song)
                 result = .success(url)
             } catch {
                 result = .failure(error)
@@ -1059,7 +1059,12 @@ final class PlayerManager: NSObject, ObservableObject {
                 if seconds.isFinite, abs(seconds - self.duration) > 0.25 {
                     self.duration = seconds
                     // 回写真实时长到本地歌曲，便于列表展示。
-                    LocalAudioLibrary.shared.updateDuration(song: song, duration: seconds)
+                    // LocalAudioLibrary 是 @MainActor；timeObserver 闭包已运行于主线程，
+                    // 这里用 Task 显式 hop 到 MainActor，避免 actor 隔离告警。
+                    let capturedSong = song
+                    Task { @MainActor in
+                        LocalAudioLibrary.shared.updateDuration(song: capturedSong, duration: seconds)
+                    }
                 }
             }
             let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate

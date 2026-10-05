@@ -136,17 +136,22 @@ final class LocalAudioLibrary: ObservableObject {
     ///
     /// 播放时才会调用：若缓存已存在则直接复用，否则解密后写入缓存。
     /// - 调用方应放在后台线程执行（本方法内部同步解密，可能较慢）。
-    nonisolated func playableURL(for song: Song) throws -> URL {
+    func playableURL(for song: Song) throws -> URL {
+        try Self.playableURL(for: song, musicDir: musicDirectory, cacheDir: decryptedCacheDirectory)
+    }
+
+    /// 与实例无关的解密入口：可安全地从任意线程（含 detached task）调用。
+    ///
+    /// 不依赖 `shared`（`shared` 是 `@MainActor` 隔离的），因此不会产生跨 actor 访问报错。
+    nonisolated static func playableURL(for song: Song, musicDir: URL, cacheDir: URL) throws -> URL {
         guard song.source == .local, let fileName = song.localFileName else {
             throw EncryptedAudioError.malformed("非本地歌曲")
         }
-        let dir = Self.musicDirectoryStatic()
-        let sourceURL = dir.appendingPathComponent(fileName)
+        let sourceURL = musicDir.appendingPathComponent(fileName)
         guard FileManager.default.fileExists(atPath: sourceURL.path) else {
             throw EncryptedAudioError.malformed("文件不存在：\(fileName)")
         }
 
-        let cacheDir = Self.decryptedCacheDirectoryStatic()
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
 
         let ext = EncryptedAudioDecryptor.decryptedExtension(for: sourceURL)
@@ -167,6 +172,15 @@ final class LocalAudioLibrary: ObservableObject {
         try data.write(to: outURL, options: .atomic)
         BeansLogger.shared.log("本地音乐解密完成：\(fileName) → \(outURL.lastPathComponent)（\(data.count) 字节）", level: .info)
         return outURL
+    }
+
+    /// 供后台线程调用的便捷解密入口（读取默认目录，不触碰实例状态）。
+    nonisolated static func decryptToCache(song: Song) throws -> URL {
+        try playableURL(
+            for: song,
+            musicDir: musicDirectoryStatic(),
+            cacheDir: decryptedCacheDirectoryStatic()
+        )
     }
 
     // MARK: 删除 / 清理
