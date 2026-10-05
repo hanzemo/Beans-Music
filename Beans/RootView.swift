@@ -121,8 +121,13 @@ struct RootView: View {
                         )
                     )
             } else {
+                // 用 overlay 而不是 safeAreaInset：
+                // - safeAreaInset 会从 layout 里预留空间，把系统 TabBar 向下推，
+                //   视觉上 MiniPlayer 卡片会盖住 TabBar（"底栏被挡住"）。
+                // - overlay(alignment: .bottom) 只是视觉叠加，不侵占系统 TabBar 的布局空间，
+                //   MiniPlayer 卡片就悬浮在 TabBar 正上方（贴近但不重叠）。
                 rootTabs
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                    .overlay(alignment: .bottom) {
                         if player.currentSong != nil {
                             MiniPlayerView(
                                 showPlayer: $showPlayer,
@@ -131,7 +136,9 @@ struct RootView: View {
                             )
                             .environmentObject(player.clock)
                             .padding(.horizontal, 12)
-                            .padding(.bottom, 4)
+                            // 关键：TabBar 高度约 49 + Home Indicator 34 = 83，
+                            // 再加 4pt 呼吸间距，MiniPlayer 稳稳浮在 TabBar 上方。
+                            .padding(.bottom, 87)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
                         }
                     }
@@ -368,11 +375,13 @@ struct RootView: View {
     }
 }
 private enum BeansNowPlayingPresentationMetrics {
+    // 视觉指示器（几乎不可见，仅手势锚点）
     static let indicatorTopSpacing: CGFloat = 6
     static let indicatorWidth: CGFloat = 52
     static let indicatorHeight: CGFloat = 5
-    static let indicatorHitWidth: CGFloat = 180
-    static let indicatorHitHeight: CGFloat = 82
+    // 手势命中区（关键：iOS 16 自绘下拉关闭必须足够大，否则"抓不住"）
+    static let indicatorHitWidth: CGFloat = 400
+    static let indicatorHitHeight: CGFloat = 200
     static let dismissDistance: CGFloat = 110
     static let dismissPrediction: CGFloat = 190
     static let dismissAnimation = Animation.spring(
