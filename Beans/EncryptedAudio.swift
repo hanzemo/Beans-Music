@@ -181,7 +181,8 @@ enum EncryptedAudioDecryptor {
         // CRC32(4) + image version(1)
         pos += 5
 
-        // cover frame
+        // cover frame: cover_frame_len(4) + image_len(4) + image(image_len) + padding(cover_frame_len - image_len)
+        // 之后即为音频区（NCM 格式本身没有 audio_len 字段，直到 EOF）
         guard let coverFrameLen = readU32(bytes, &pos),
               let imageLen = readU32(bytes, &pos) else {
             throw EncryptedAudioError.malformed("ncm 封面区异常")
@@ -193,12 +194,8 @@ enum EncryptedAudioDecryptor {
         pos += imageLen
         pos += coverFrameLen - imageLen
 
-        // audio_len
-        guard let audioLen = readU32(bytes, &pos) else {
-            throw EncryptedAudioError.malformed("ncm 音频长度读取失败")
-        }
         let audioStart = pos
-        let audioEnd = min(audioStart + audioLen, bytes.count)
+        let audioEnd = bytes.count
         guard audioStart < bytes.count else {
             throw EncryptedAudioError.malformed("ncm 音频区偏移异常")
         }
