@@ -466,6 +466,11 @@ final class PlayerManager: NSObject, ObservableObject {
         guard let song = currentSong else { return }
         loadGeneration += 1
         let generation = loadGeneration
+        // 本机加密音乐：走独立链路，播放时才解密到缓存，不解析任何网络地址。
+        if song.source == .local {
+            loadLocalSong(song, resumeAt: resumeAt, generation: generation)
+            return
+        }
         thirdPartyRetryExcludedHostsBySong.removeValue(forKey: song.identityKey)
         attemptedThirdPartyQualitiesBySong.removeValue(forKey: song.identityKey)
         attemptedQQOfficialBRsBySong.removeValue(forKey: song.identityKey)
@@ -937,6 +942,147 @@ final class PlayerManager: NSObject, ObservableObject {
         return true
     }
 
+    /// 本机加密音乐播放链路：后台解密到缓存文件，再交给 AVPlayer。
+    private func loadLocalSong(_ song: Song, resumeAt: Double?, generation: Int) {
+        player?.pause()
+        duration = song.duration
+        progress = max(0, min(resumeAt ?? 0, max(song.duration, 0)))
+        isPlaying = false
+        isBuffering = true
+        loadFailed = false
+        pushHistory(song)
+        savePersistedPlaybackState()
+        BeansLogger.shared.log("▶ 开始播放本地加密音乐：\(song.name) - \(song.artists)｜文件=\(song.localFileName ?? "?")", level: .info)
+
+        let initialProgress = progress
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let result: Result<URL, Error>
+            do {
+                let url = try LocalAudioLibrary.shared.playableURL(for: song)
+                result = .success(url)
+            } catch {
+                result = .failure(error)
+            }
+            await MainActor.run {
+                guard let self, generation == self.loadGeneration else { return }
+                switch result {
+                case .success(let url):
+                    // 解密后交给播放器；本地文件无需请求头与降级逻辑。
+                    self.setupLocalPlayer(url: url, resumeAt: initialProgress)
+                case .failure(let error):
+                    self.isBuffering = false
+                    self.loadFailed = true
+                    let message = beansLocalized(
+                        "本地音乐解密失败：\(error.localizedDescription)",
+                        "Failed to decrypt local audio: \(error.localizedDescription)"
+                    )
+                    BeansLogger.shared.log("本地音乐解密失败：\(song.name)｜\(error.localizedDescription)", level: .error)
+                    self.finishUnrecoverablePlaybackFailure(song: song, reason: "本地解密失败", message: message)
+                }
+            }
+        }
+    }
+
+    /// 用解密后的本地文件构建 AVPlayer。
+    private func setupLocalPlayer(url: URL, resumeAt: Double) {
+        guard ensurePlaybackAllowed(), let loadedSong = currentSong else { return }
+        prepareForSystemPlayback()
+        configureAudioSession()
+        UIApplication.shared.beginReceivingRemoteControlEvents()
+        removeCurrentObservers()
+        pendingThirdPartyVIPNotice = nil
+        activeThirdPartyQuality = nil
+        activeQQOfficialBR = nil
+
+        let item = AVPlayerItem(url: url)
+        BeansLogger.shared.log("AVPlayer 准备播放本地文件：\(loadedSong.name)｜路径=\(url.lastPathComponent)", level: .debug)
+        let player = AVPlayer(playerItem: item)
+        player.automaticallyWaitsToMinimizeStalling = false
+        player.rate = Float(rate)
+        self.player = player
+        configureEqualizer(for: item)
+        playbackConfirmed = false
+
+        itemStatusObserver = item.observe(\.status, options: [.new]) { [weak self] item, _ in
+            guard let self else { return }
+            self.performOnMain { [weak self] in
+                guard let self,
+                      self.player === player,
+                      self.currentSong?.identityKey == loadedSong.identityKey,
+                      item.status == .failed else { return }
+                self.logPlaybackFailure(reason: "本地文件 AVPlayerItem.status.failed", item: item, url: url, isThirdParty: false, playbackHeaders: [:])
+                self.finishUnrecoverablePlaybackFailure(song: loadedSong, reason: "本地文件加载失败")
+            }
+        }
+        timeControlStatusObserver = player.observe(\.timeControlStatus, options: [.new]) { [weak self] player, _ in
+            guard let self else { return }
+            self.performOnMain { [weak self] in
+                guard let self, self.player === player else { return }
+                let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+                if waiting != self.isBuffering { self.isBuffering = waiting }
+                if player.timeControlStatus == .playing, !self.playbackConfirmed {
+                    self.playbackConfirmed = true
+                    self.isPlaying = true
+                }
+            }
+        }
+        if resumeAt > 0.5 {
+            player.seek(to: CMTime(seconds: resumeAt, preferredTimescale: 600), toleranceBefore: .zero, toleranceAfter: .zero)
+            progress = resumeAt
+        }
+        player.playImmediately(atRate: Float(rate))
+        isPlaying = true
+        isBuffering = false
+        loadFailed = false
+        if lastCountedSongID != loadedSong.identityKey {
+            bumpPlayCount(loadedSong)
+            lastCountedSongID = loadedSong.identityKey
+        }
+        installLocalPlaybackObservers(player: player, item: item, song: loadedSong)
+        updateNowPlaying()
+    }
+
+    /// 本地文件播放的进度 / 结束 / 失败监听。
+    private func installLocalPlaybackObservers(player: AVPlayer, item: AVPlayerItem, song: Song) {
+        timeObserver = player.addPeriodicTimeObserver(forInterval: CMTime(seconds: 0.2, preferredTimescale: 600), queue: .main) { [weak self] time in
+            guard let self, let player = self.player else { return }
+            if time.seconds.isFinite, abs(time.seconds - self.lastPublishedProgress) >= 0.18 {
+                self.lastPublishedProgress = time.seconds
+                self.progress = time.seconds
+                if abs(time.seconds - self.lastPersistedProgress) >= 2.0 {
+                    self.lastPersistedProgress = time.seconds
+                    self.savePersistedPlaybackState()
+                }
+            }
+            if let itemDuration = player.currentItem?.duration, itemDuration.isNumeric {
+                let seconds = itemDuration.seconds
+                if seconds.isFinite, abs(seconds - self.duration) > 0.25 {
+                    self.duration = seconds
+                    // 回写真实时长到本地歌曲，便于列表展示。
+                    LocalAudioLibrary.shared.updateDuration(song: song, duration: seconds)
+                }
+            }
+            let waiting = player.timeControlStatus == .waitingToPlayAtSpecifiedRate
+            if waiting != self.isBuffering { self.isBuffering = waiting }
+        }
+        endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            guard let self else { return }
+            if self.playMode == .repeatOne {
+                self.restartCurrent()
+            } else {
+                self.advance()
+                self.loadCurrent()
+            }
+        }
+        failureObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemFailedToPlayToEndTime, object: item, queue: .main) { [weak self] _ in
+            guard let self,
+                  self.player?.currentItem === item,
+                  self.currentSong?.identityKey == song.identityKey else { return }
+            self.logPlaybackFailure(reason: "本地文件播放中断", item: item, url: URL(fileURLWithPath: "/"), isThirdParty: false, playbackHeaders: [:])
+            self.finishUnrecoverablePlaybackFailure(song: song, reason: "本地文件播放中断")
+        }
+    }
+
     private func setupPlayer(
         url: URL,
         thirdPartyVIPNotice: ThirdPartyVIPNotice? = nil,
@@ -1262,6 +1408,9 @@ final class PlayerManager: NSObject, ObservableObject {
                 quality: quality,
                 excludedHosts: excludedHosts
             )
+        case .local:
+            // 本地加密音乐不走第三方音源兜底。
+            return nil
         }
     }
 
@@ -1436,6 +1585,8 @@ final class PlayerManager: NSObject, ObservableObject {
                 return false
             }
             return user.vipBadge != nil
+        case .local:
+            return false
         }
     }
 

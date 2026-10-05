@@ -2791,6 +2791,8 @@ struct PlayerView: View {
         case .kugou:
             let encoded = song.name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? song.name
             return URL(string: "https://www.kugou.com/yy/html/search.html#searchType=song&searchKeyWord=\(encoded)")
+        case .local:
+            return nil
         }
     }
 
@@ -4673,21 +4675,11 @@ private struct PlayerSettingsLiquidGlass<S: Shape>: View {
     }
 
     var body: some View {
+        // 统一走系统材质 / 原生 Liquid Glass（越狱环境由 Liquidass 接管渲染）。
         if #available(iOS 26, *), uiStyle == .liquid {
-            GlassEffectContainer {
-                shape
-                    .fill(.clear)
-                    .glassEffect(.clear, in: shape)
-            }
+            BeansGlassBackground(shape: shape, level: .thin, forceNative: true)
         } else {
-            switch uiStyle {
-            case .clear, .liquid:
-                shape.fill(.ultraThinMaterial)
-            case .compact:
-                shape.fill(Color.beansGlassFill.opacity(0.74))
-            case .nativeClean:
-                shape.fill(Color.primary.opacity(0.038))
-            }
+            BeansGlassBackground(shape: shape, level: .thin)
         }
     }
 

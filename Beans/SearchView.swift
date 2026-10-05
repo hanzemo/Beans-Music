@@ -980,6 +980,8 @@ struct AlbumDetailView: View {
                         (try? await KugouMusicAPI.shared.searchSongs(keyword: query, limit: 100)) ?? []
                     }
                 )
+            case .local:
+                result = []
             }
             if !result.isEmpty {
                 cache.save(result, for: cacheKey)

@@ -36,6 +36,9 @@ final class FavoritesStore: ObservableObject {
             return qqFavoriteSongs.contains { $0.identityKey == song.identityKey }
         case .kugou:
             return kugouFavoriteSongs.contains { $0.identityKey == song.identityKey }
+        case .local:
+            // 本地加密音乐不参与云端收藏体系。
+            return false
         }
     }
 
@@ -75,6 +78,9 @@ final class FavoritesStore: ObservableObject {
             let liked = !isLiked(song)
             updateKugou(song, liked: liked)
             return true
+        case .local:
+            // 本地加密音乐不参与云端收藏体系。
+            return false
         }
     }
 

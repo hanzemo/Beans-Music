@@ -120,18 +120,8 @@ struct GlassBackdrop: View {
             } else {
                 LinearGradient.beansBackdrop
             }
-            if uiStyle != .nativeClean {
-                Circle()
-                    .fill(Color.beansAmber.opacity(0.14))
-                    .frame(width: 340, height: 340)
-                    .blur(radius: 100)
-                    .offset(x: 150, y: -300)
-                Circle()
-                    .fill(Color.beansSage.opacity(0.12))
-                    .frame(width: 300, height: 300)
-                    .blur(radius: 110)
-                    .offset(x: -160, y: 340)
-            }
+            // 旧版本会额外叠加 Amber / Sage 光斑来"模拟"液态玻璃的可采样内容；
+            // 现在统一交给系统材质 + Liquidass 插件渲染，App 不再自绘光斑。
         }
         .ignoresSafeArea()
     }
@@ -181,28 +171,11 @@ struct BeansGlass<S: Shape>: View {
 
     var body: some View {
         if isLiquid {
-            if #available(iOS 26, *) {
-                GlassEffectContainer {
-                    shape
-                        .fill(.clear)
-                        .glassEffect(.clear, in: shape)
-                }
-            } else {
-                shape
-                    .fill(.ultraThinMaterial)
-            }
+            // iOS 26 使用系统原生 Liquid Glass；低版本统一走系统材质，
+            // 越狱环境由 Liquidass 插件接管材质渲染，App 不再自绘模拟玻璃。
+            BeansGlassBackground(shape: shape, level: .thin, forceNative: true)
         } else {
-            switch uiStyle {
-            case .clear, .liquid:
-                shape
-                    .fill(.ultraThinMaterial)
-            case .compact:
-                shape
-                    .fill(Color.beansGlassFill.opacity(0.74))
-            case .nativeClean:
-                shape
-                    .fill(Color.beansGlassFill.opacity(0.62))
-            }
+            BeansGlassBackground(shape: shape, level: .thin)
         }
     }
 }
@@ -251,32 +224,18 @@ struct GlassCard<Content: View>: View {
     }
 
     var body: some View {
-        if isLiquid {
-            if #available(iOS 26, *) {
-                GlassEffectContainer {
-                    content()
-                        .padding(resolvedPadding)
-                        .glassEffect(.clear, in: .rect(cornerRadius: resolvedCornerRadius))
-                }
-                .beansCardShadow(radius: 9, y: 3)
-            } else {
-                content()
-                    .padding(resolvedPadding)
-                    .background(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous).fill(.ultraThinMaterial))
-                    .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
-                    .beansCardShadow(radius: 9, y: 3)
+        // 统一改为系统材质 / 原生 Liquid Glass，移除自绘模拟玻璃分支。
+        content()
+            .padding(resolvedPadding)
+            .background {
+                BeansGlassBackground(
+                    shape: RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous),
+                    level: .regular,
+                    forceNative: isLiquid
+                )
             }
-        } else {
-            content()
-                .padding(resolvedPadding)
-                .background {
-                    RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous)
-                        .fill(uiStyle == .compact ? Color.beansGlassFill.opacity(0.72) : Color.clear)
-                        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
-                }
-                .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
-                .beansCardShadow(radius: 9, y: 3)
-        }
+            .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
+            .beansCardShadow(radius: 9, y: 3)
     }
 }
 

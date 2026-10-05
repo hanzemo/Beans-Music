@@ -36,6 +36,9 @@ struct LocalMusicSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
+            // 本机加密音乐入口（导入 / 手动放文件 / 播放）
+            LocalEncryptedMusicSection()
+
             HStack {
                 Text("本地音乐库")
                     .font(BeansFont.appFont(21, .bold))

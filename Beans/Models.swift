@@ -112,6 +112,7 @@ enum ThirdPartyAudioQuality: String, CaseIterable, Identifiable, Sendable {
         case .netease: return supported(providerCode: "wy")
         case .qq: return supported(providerCode: "tx")
         case .kugou: return supported(providerCode: "kg")
+        case .local: return [.kb128, .kb320, .flac]
         }
     }
 
@@ -143,12 +144,16 @@ enum SongSource: String, Codable, Sendable {
     case netease
     case qq
     case kugou
+    /// 本机导入的加密音乐（ncm / kgm / vpr / mflac / mgg），播放时临时解密。
+    case local
 
     /// 兼容旧版本地收藏：未知或已下线来源统一回退为网易云
     init(from decoder: Decoder) throws {
         let raw = try decoder.singleValueContainer().decode(String.self)
         self = SongSource(rawValue: raw) ?? .netease
     }
+
+    var isLocal: Bool { self == .local }
 }
 
 struct Song: Identifiable, Hashable, Codable {
@@ -171,6 +176,8 @@ struct Song: Identifiable, Hashable, Codable {
     let kugouQualityHashes: [String: String]?
     /// 付费/VIP 标记（网易云：0 免费、1 VIP、4 付费单曲；QQ：0 免费、非 0 付费）
     let fee: Int
+    /// 本机加密音乐文件名（仅 source == .local 时有效，相对「本地音乐」目录）
+    let localFileName: String?
 
     var formattedDuration: String {
         let total = max(0, Int(duration))
@@ -183,6 +190,7 @@ struct Song: Identifiable, Hashable, Codable {
         case .qq: return "qq-\(id)"
         case .kugou: return "kugou-\(id)"
         case .netease: return "netease-\(id)"
+        case .local: return "local-\(localFileName ?? String(id))"
         }
     }
 
@@ -197,10 +205,12 @@ struct Song: Identifiable, Hashable, Codable {
             return fee != 0
         case .kugou:
             return fee != 0
+        case .local:
+            return false
         }
     }
 
-    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0) {
+    init(id: Int, name: String, artists: String, album: String, coverURL: URL?, duration: TimeInterval, source: SongSource = .netease, qqMid: String? = nil, qqMediaMid: String? = nil, kugouHash: String? = nil, kugouAlbumAudioId: String? = nil, kugouAlbumId: String? = nil, kugouQualityHashes: [String: String]? = nil, fee: Int = 0, localFileName: String? = nil) {
         self.id = id
         self.name = name
         self.artists = artists
@@ -215,6 +225,7 @@ struct Song: Identifiable, Hashable, Codable {
         self.kugouAlbumId = kugouAlbumId
         self.kugouQualityHashes = kugouQualityHashes
         self.fee = fee
+        self.localFileName = localFileName
     }
 
     init?(json: [String: Any]) {
@@ -245,9 +256,10 @@ struct Song: Identifiable, Hashable, Codable {
         kugouAlbumId = nil
         kugouQualityHashes = nil
         fee = json["fee"] as? Int ?? 0
+        localFileName = nil
     }
 
-    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee }
+    private enum CodingKeys: String, CodingKey { case id, name, artists, album, coverURL, duration, source, qqMid, qqMediaMid, kugouHash, kugouAlbumAudioId, kugouAlbumId, kugouQualityHashes, fee, localFileName }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -265,6 +277,7 @@ struct Song: Identifiable, Hashable, Codable {
         kugouAlbumId = try c.decodeIfPresent(String.self, forKey: .kugouAlbumId)
         kugouQualityHashes = try c.decodeIfPresent([String: String].self, forKey: .kugouQualityHashes)
         fee = try c.decodeIfPresent(Int.self, forKey: .fee) ?? 0
+        localFileName = try c.decodeIfPresent(String.self, forKey: .localFileName)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -283,6 +296,7 @@ struct Song: Identifiable, Hashable, Codable {
         try c.encodeIfPresent(kugouAlbumId, forKey: .kugouAlbumId)
         try c.encodeIfPresent(kugouQualityHashes, forKey: .kugouQualityHashes)
         try c.encode(fee, forKey: .fee)
+        try c.encodeIfPresent(localFileName, forKey: .localFileName)
     }
 }
 

@@ -56,6 +56,8 @@ struct BeansApp: App {
                 player.resumePersistedPlaybackIfEnabled()
                 FontManager.reinstallIfNeeded()
                 theme.restoreWallpapersIfNeeded()
+                // 启动自动读取「本地音乐」目录中的加密音乐文件。
+                LocalAudioLibrary.shared.scan()
             }
             .onChange(of: scenePhase) { phase in
                 guard phase == .active else { return }
