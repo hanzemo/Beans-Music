@@ -13,8 +13,17 @@ struct BeansApp: App {
     @AppStorage("beans.language") private var languageRaw = AppLanguage.chinese.rawValue
 
     init() {
-        // 闪退检测：优先初始化，检测上次异常退出并安装崩溃捕获
+        // 闪跳检测：优先初始化，检测上次异常退出并安装崩溃捕获
         _ = CrashReporter.shared
+        // 配置全局 URLCache：让 AsyncImage（走 URLSession.shared）自动命中缓存，
+        // 音乐库/歌单列表滚动时不再重复发起相同的封面网络请求。
+        let cacheDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("URLCache", isDirectory: true)
+        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        // 256 MB 磁盘缓存 + 64 MB 内存缓存，够存几百张封面
+        URLCache.shared = URLCache(memoryCapacity: 64 * 1024 * 1024,
+                                    diskCapacity: 256 * 1024 * 1024,
+                                    diskPath: cacheDir.path)
         // 主页暂停只应在设置页打开期间生效，避免异常退出后把暂停状态永久写入本地。
         UserDefaults.standard.set(false, forKey: "beans.pauseHomeRendering")
         // 新安装默认开启高刷新率；老用户保留自己手动关闭的选择。
