@@ -81,7 +81,7 @@ struct LocalEncryptedMusicSection: View {
                         showClearCacheConfirm = true
                     }
                 }
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(library.songs) { song in
                         localSongRow(song)
                     }
@@ -141,6 +141,47 @@ struct LocalEncryptedMusicSection: View {
                         .foregroundStyle(Color.beansLabel)
                         .lineLimit(1)
                     Text(song.duration > 0 ? "\(song.artists) · \(song.formattedDuration)" : song.artists)
+                        .font(BeansFont.appFont(12))
+                        .foregroundStyle(Color.beansComment)
+                        .lineLimit(1)
+                }
+                Spacer(minLength: 8)
+                Image(systemName: isCurrent(song) ? "waveform.circle.fill" : "play.circle")
+                    .font(.system(size: 20))
+                    .foregroundStyle(isCurrent(song) ? Color.beansAmber : Color.beansComment.opacity(0.6))
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .contextMenu {
+            Button(role: .destructive) {
+                library.remove(song: song)
+                importMessage = isEnglish ? "Deleted \(song.name)" : "已删除 \(song.name)"
+            } label: {
+                Label(isEnglish ? "Delete File" : "删除文件", systemImage: "trash")
+            }
+        }
+    }
+
+    /// 列表行（轻量版，不构建封面渐变 + 图标，减少大列表渲染开销）。
+    @ViewBuilder
+    private func localSongRowLite(_ song: Song) -> some View {
+        Button {
+            play(song)
+        } label: {
+            HStack(spacing: 12) {
+                Image(systemName: "music.note")
+                    .font(.system(size: 18))
+                    .foregroundStyle(Color.beansAmber.opacity(0.85))
+                    .frame(width: 44, height: 44)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(song.name)
+                        .font(BeansFont.appFont(15, .medium))
+                        .foregroundStyle(Color.beansLabel)
+                        .lineLimit(1)
+                    Text(song.artists)
                         .font(BeansFont.appFont(12))
                         .foregroundStyle(Color.beansComment)
                         .lineLimit(1)
