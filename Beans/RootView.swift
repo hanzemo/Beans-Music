@@ -101,13 +101,14 @@ struct RootView: View {
         .tint(Color.beansAmber)
         .background {
             TabBarAppearanceConfigurator(
-                hidesSystemTabBarOnLegacy: !usesSystemFloatingTabBar,
+                hidesSystemTabBarOnLegacy: false,
                 onHomeLongPress: { showHomePlatformMenu = true }
             )
         }
 
         ZStack {
-            // iOS 26 用系统 tab accessory，把迷你播放器缩进底栏槽位；旧系统走自绘胶囊底栏。
+            // iOS 26 用系统 tab accessory，把迷你播放器缩进底栏槽位；
+            // 旧系统（含 iOS 16）直接使用系统 TabView 底栏，迷你播放器叠加在其上方。
             if #available(iOS 26.0, *) {
                 rootTabs
                     .modifier(
@@ -122,8 +123,17 @@ struct RootView: View {
             } else {
                 rootTabs
                     .safeAreaInset(edge: .bottom, spacing: 0) {
-                        legacyFloatingTabBar
+                        if player.currentSong != nil {
+                            MiniPlayerView(
+                                showPlayer: $showPlayer,
+                                presentation: .dock,
+                                transitionNamespace: nowPlayingTransition
+                            )
+                            .environmentObject(player.clock)
+                            .padding(.horizontal, 12)
+                            .padding(.bottom, 4)
                             .transition(.move(edge: .bottom).combined(with: .opacity))
+                        }
                     }
             }
         }

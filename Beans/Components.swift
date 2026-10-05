@@ -168,18 +168,13 @@ struct BeansGlass<S: Shape>: View {
     }
 
     var body: some View {
-        if isLiquid {
-            // iOS 26 使用系统原生 Liquid Glass；低版本统一走系统材质，
-            // 越狱环境由 Liquidass 插件接管材质渲染，App 不再自绘模拟玻璃。
-            BeansGlassBackground(shape: shape, level: .thin, forceNative: true)
-        } else {
-            BeansGlassBackground(shape: shape, level: .thin)
-        }
+        // 统一走系统原生材质（iOS 26 原生 Liquid Glass，低版本系统材质 + Liquidass 接管），
+        // 不再自绘模拟玻璃。
+        BeansGlassBackground(shape: shape, level: .thin, forceNative: true)
     }
 }
 
-/// 统一表面容器：Apple 简洁样式使用低存在感的平面底色，
-/// 其他样式继续沿用原有的玻璃材质，避免页面局部出现不同质感。
+/// 统一表面容器：跟随全局 UI 样式的表面材质。
 struct BeansSurface<S: Shape>: View {
     @AppStorage("beans.uiStyle") private var uiStyleRaw = BeansUIStyle.liquid.rawValue
 
@@ -190,13 +185,8 @@ struct BeansSurface<S: Shape>: View {
     }
 
     var body: some View {
-        if isLiquid {
-            // iOS 26 使用系统原生 Liquid Glass；低版本统一走系统材质，
-            // 越狱环境由 Liquidass 插件接管材质渲染，App 不再自绘模拟玻璃。
-            BeansGlassBackground(shape: shape, level: .thin, forceNative: true)
-        } else {
-            BeansGlassBackground(shape: shape, level: .thin)
-        }
+        // 统一走系统原生材质，不再自绘模拟玻璃。
+        BeansGlassBackground(shape: shape, level: .thin, forceNative: true)
     }
 }
 
