@@ -346,6 +346,11 @@ enum AESECB {
         }
         var outLength = 0
         var out = [UInt8](repeating: 0, count: input.count + kCCBlockSizeAES128)
+        // Swift 独占访问规则：withUnsafeMutableBytes 闭包内不能再访问 out，
+        // 因此把需要的字段提前拷贝到局部变量。
+        let keySize = key.count
+        let inputSize = input.count
+        let outSize = out.count
         let status = key.withUnsafeBytes { keyPtr in
             input.withUnsafeBytes { inPtr in
                 out.withUnsafeMutableBytes { outPtr in
@@ -353,10 +358,10 @@ enum AESECB {
                         CCOperation(operation),
                         CCAlgorithm(kCCAlgorithmAES),
                         CCOptions(kCCOptionECBMode),
-                        keyPtr.baseAddress, key.count,
+                        keyPtr.baseAddress, keySize,
                         nil,
-                        inPtr.baseAddress, input.count,
-                        outPtr.baseAddress, out.count,
+                        inPtr.baseAddress, inputSize,
+                        outPtr.baseAddress, outSize,
                         &outLength
                     )
                 }
