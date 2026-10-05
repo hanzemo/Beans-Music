@@ -122,6 +122,8 @@ final class PlayerManager: NSObject, ObservableObject {
     /// 本地加密音乐：当前 item 是否真正进入过 playing 状态。
     /// 未播放过就收到的 DidPlayToEndTime 多半是 duration 异常导致的误触发，应忽略。
     private var localPlaybackEverPlayed = false
+    /// 本地加密音乐：上次成功开始播放的时间戳，用于 0.5 秒内重复触发去抖。
+    private var localPlaybackLastStartAt: Date = .distantPast
     private static let nowPlayingArtworkCache = NSCache<NSURL, UIImage>()
 
     private let historyKey = "beans.history"
@@ -952,10 +954,19 @@ final class PlayerManager: NSObject, ObservableObject {
 
     /// 本机加密音乐播放链路：后台解密到缓存文件，再交给 AVPlayer。
     private func loadLocalSong(_ song: Song, resumeAt: Double?, generation: Int) {
-        // 重入保护：同一首歌正在加载/播放时，忽略后续重复触发，避免死循环。
+        // 重入保护 1：同一首歌正在加载/播放时，忽略后续重复触发，避免死循环。
         if localPlaybackLoadingSongKey == song.identityKey {
             return
         }
+        // 重入保护 2：0.5 秒内重复触发（同一首歌）直接忽略，防止极快切歌导致循环。
+        let now = Date()
+        if localPlaybackLastStartAt.timeIntervalSinceNow < -0.5 {
+            // 距离上次成功开始超过 0.5 秒，允许继续
+        } else {
+            BeansLogger.shared.log("本地音乐：0.5 秒内重复触发被忽略（去抖），歌曲=\(song.name)", level: .debug)
+            return
+        }
+        localPlaybackLastStartAt = now
         localPlaybackLoadingSongKey = song.identityKey
         localPlaybackEverPlayed = false
         player?.pause()
@@ -1001,6 +1012,11 @@ final class PlayerManager: NSObject, ObservableObject {
     /// 用解密后的本地文件构建 AVPlayer。
     private func setupLocalPlayer(url: URL, resumeAt: Double) {
         guard ensurePlaybackAllowed(), let loadedSong = currentSong else { return }
+        // 重入保护：加载期间忽略重复调用。
+        if localPlaybackLoadingSongKey != loadedSong.identityKey {
+            BeansLogger.shared.log("本地音乐：setupLocalPlayer 重入被忽略，歌曲=\(loadedSong.name)", level: .debug)
+            return
+        }
         prepareForSystemPlayback()
         configureAudioSession()
         UIApplication.shared.beginReceivingRemoteControlEvents()

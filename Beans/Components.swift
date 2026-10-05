@@ -120,8 +120,6 @@ struct GlassBackdrop: View {
             } else {
                 LinearGradient.beansBackdrop
             }
-            // 旧版本会额外叠加 Amber / Sage 光斑来"模拟"液态玻璃的可采样内容；
-            // 现在统一交给系统材质 + Liquidass 插件渲染，App 不再自绘光斑。
         }
         .ignoresSafeArea()
     }
@@ -192,7 +190,13 @@ struct BeansSurface<S: Shape>: View {
     }
 
     var body: some View {
-        BeansGlass(shape: shape)
+        if isLiquid {
+            // iOS 26 使用系统原生 Liquid Glass；低版本统一走系统材质，
+            // 越狱环境由 Liquidass 插件接管材质渲染，App 不再自绘模拟玻璃。
+            BeansGlassBackground(shape: shape, level: .thin, forceNative: true)
+        } else {
+            BeansGlassBackground(shape: shape, level: .thin)
+        }
     }
 }
 
