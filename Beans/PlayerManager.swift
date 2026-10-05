@@ -117,6 +117,11 @@ final class PlayerManager: NSObject, ObservableObject {
     private var qqThirdPartyFallbackSongKey: String?
     private var playbackConfirmationWorkItem: DispatchWorkItem?
     private var playbackStallWorkItem: DispatchWorkItem?
+    /// 本地加密音乐：当前正在加载/播放的歌曲标识，用于重入保护，避免死循环。
+    private var localPlaybackLoadingSongKey: String?
+    /// 本地加密音乐：当前 item 是否真正进入过 playing 状态。
+    /// 未播放过就收到的 DidPlayToEndTime 多半是 duration 异常导致的误触发，应忽略。
+    private var localPlaybackEverPlayed = false
     private static let nowPlayingArtworkCache = NSCache<NSURL, UIImage>()
 
     private let historyKey = "beans.history"
@@ -471,6 +476,9 @@ final class PlayerManager: NSObject, ObservableObject {
             loadLocalSong(song, resumeAt: resumeAt, generation: generation)
             return
         }
+        // 切到非本地歌曲时，清掉本地播放的重入保护标记。
+        localPlaybackLoadingSongKey = nil
+        localPlaybackEverPlayed = false
         thirdPartyRetryExcludedHostsBySong.removeValue(forKey: song.identityKey)
         attemptedThirdPartyQualitiesBySong.removeValue(forKey: song.identityKey)
         attemptedQQOfficialBRsBySong.removeValue(forKey: song.identityKey)
@@ -944,6 +952,12 @@ final class PlayerManager: NSObject, ObservableObject {
 
     /// 本机加密音乐播放链路：后台解密到缓存文件，再交给 AVPlayer。
     private func loadLocalSong(_ song: Song, resumeAt: Double?, generation: Int) {
+        // 重入保护：同一首歌正在加载/播放时，忽略后续重复触发，避免死循环。
+        if localPlaybackLoadingSongKey == song.identityKey {
+            return
+        }
+        localPlaybackLoadingSongKey = song.identityKey
+        localPlaybackEverPlayed = false
         player?.pause()
         duration = song.duration
         progress = max(0, min(resumeAt ?? 0, max(song.duration, 0)))
@@ -972,6 +986,7 @@ final class PlayerManager: NSObject, ObservableObject {
                 case .failure(let error):
                     self.isBuffering = false
                     self.loadFailed = true
+                    self.localPlaybackLoadingSongKey = nil
                     let message = beansLocalized(
                         "本地音乐解密失败：\(error.localizedDescription)",
                         "Failed to decrypt local audio: \(error.localizedDescription)"
@@ -1023,6 +1038,7 @@ final class PlayerManager: NSObject, ObservableObject {
                 if player.timeControlStatus == .playing, !self.playbackConfirmed {
                     self.playbackConfirmed = true
                     self.isPlaying = true
+                    self.localPlaybackEverPlayed = true
                 }
             }
         }
@@ -1072,9 +1088,16 @@ final class PlayerManager: NSObject, ObservableObject {
         }
         endObserver = NotificationCenter.default.addObserver(forName: .AVPlayerItemDidPlayToEndTime, object: item, queue: .main) { [weak self] _ in
             guard let self else { return }
+            // 去抖：未真正进入 playing 就收到的 end 通知（duration 异常的误触发）忽略，
+            // 否则会在"item 刚 ready 即 end"的情况下陷入切歌→重载→又 end 的死循环。
+            guard self.localPlaybackEverPlayed else {
+                BeansLogger.shared.log("本地音乐：忽略未播放即触发的结束通知，避免死循环", level: .debug)
+                return
+            }
             if self.playMode == .repeatOne {
                 self.restartCurrent()
             } else {
+                self.localPlaybackLoadingSongKey = nil
                 self.advance()
                 self.loadCurrent()
             }
@@ -1084,6 +1107,7 @@ final class PlayerManager: NSObject, ObservableObject {
                   self.player?.currentItem === item,
                   self.currentSong?.identityKey == song.identityKey else { return }
             self.logPlaybackFailure(reason: "本地文件播放中断", item: item, url: URL(fileURLWithPath: "/"), isThirdParty: false, playbackHeaders: [:])
+            self.localPlaybackLoadingSongKey = nil
             self.finishUnrecoverablePlaybackFailure(song: song, reason: "本地文件播放中断")
         }
     }
