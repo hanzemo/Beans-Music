@@ -218,15 +218,17 @@ struct GlassCard<Content: View>: View {
     }
 
     var body: some View {
-        // 统一改为系统材质 / 原生 Liquid Glass，移除自绘模拟玻璃分支。
+        // iOS 26+ 走原生 Liquid Glass；iOS < 26 走 .ultraThinMaterial（薄材质，性能友好，
+        // 越狱安装 Liquidass 插件时系统会自动把超薄材质重绘为液态玻璃）。
+        // 不用 .regularMaterial：音乐列表卡片数量多，regular 的模糊合成成本会卡 UI。
         content()
             .padding(resolvedPadding)
             .background {
-                BeansGlassBackground(
-                    shape: RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous),
-                    level: .regular,
-                    forceNative: isLiquid
-                )
+                if uiStyle == .liquid || uiStyle == .nativeClean {
+                    BeansGlassBackground(shape: RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous), level: .thin)
+                } else {
+                    RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous).fill(Color.beansCardFill)
+                }
             }
             .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
             .beansCardShadow(radius: 9, y: 3)
