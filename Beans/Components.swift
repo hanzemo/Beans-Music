@@ -227,7 +227,7 @@ struct GlassCard<Content: View>: View {
                 if uiStyle == .liquid || uiStyle == .nativeClean {
                     BeansGlassBackground(shape: RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous), level: .thin)
                 } else {
-                    RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous).fill(Color.beansCardFill)
+                    RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous).fill(Color.beansCard)
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: resolvedCornerRadius, style: .continuous))
