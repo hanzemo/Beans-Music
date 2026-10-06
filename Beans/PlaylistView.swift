@@ -178,8 +178,6 @@ struct PlaylistView: View {
         }
         displayedTracks = list
     }
-        return list
-    }
 
     private func load(force: Bool = false) async {
         let cache = SyncedPlaylistCache.shared
