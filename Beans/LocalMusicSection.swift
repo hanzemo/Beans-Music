@@ -90,7 +90,7 @@ struct LocalMusicSection: View {
                     text: emptyLocalPlaylistText
                 )
             } else {
-                VStack(spacing: 0) {
+                LazyVStack(spacing: 0) {
                     ForEach(store.playlists) { playlist in
                         Button {
                             selected = playlist

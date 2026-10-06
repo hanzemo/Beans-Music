@@ -16,6 +16,8 @@ struct PlaylistView: View {
 
     let playlist: Playlist
     @State private var tracks: [Song] = []
+    /// 排序/过滤后的展示列表（缓存到 @State，避免每次 body 重算时全量重排）
+    @State private var displayedTracks: [Song] = []
     @State private var loading = true
     @State private var errorMessage: String?
     @State private var searchText = ""
@@ -75,6 +77,9 @@ struct PlaylistView: View {
             .navigationTitle(playlist.name)
             .navigationBarTitleDisplayMode(.inline)
         .task { await load() }
+        .onChange(of: tracks) { _ in recomputeDisplayedTracks() }
+        .onChange(of: searchText) { _ in recomputeDisplayedTracks() }
+        .onChange(of: sortMode) { _ in recomputeDisplayedTracks() }
     }
 
     private var header: some View {
@@ -152,8 +157,9 @@ struct PlaylistView: View {
         .background { BeansSurface(shape: RoundedRectangle(cornerRadius: 24, style: .continuous)) }
     }
 
-    /// 歌单内搜索 + 排序后的列表
-    private var displayedTracks: [Song] {
+    /// 根据 tracks / searchText / sortMode 重新计算展示列表。
+    /// 通过 .onChange 显式触发，避免每次 body 都全量 filter + sort 几百首歌。
+    private func recomputeDisplayedTracks() {
         var list = tracks
         let kw = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         if !kw.isEmpty {
@@ -170,6 +176,8 @@ struct PlaylistView: View {
         case .duration:
             list.sort { $0.duration < $1.duration }
         }
+        displayedTracks = list
+    }
         return list
     }
 
@@ -178,6 +186,7 @@ struct PlaylistView: View {
         if let cached = cache.cachedSongs(playlist: playlist, accountID: cacheAccountID) {
             tracks = cached.songs
             loading = false
+            recomputeDisplayedTracks()
             if !force, cache.isFresh(cached) {
                 return
             }
@@ -192,7 +201,7 @@ struct PlaylistView: View {
             } else if playlist.source == .qq {
                 tracks = try await QQMusicAPI.shared.playlistSongs(listID: playlist.id)
                 // 云端收藏接口临时被风控或返回空时，至少展示已同步到本机的 QQ 收藏，
-                // 避免“我的喜欢”进入后变成空白页面。
+                // 避免"我的喜欢"进入后变成空白页面。
                 if tracks.isEmpty, playlist.id == QQMusicAPI.qqLikedPlaylistID {
                     tracks = favorites.qqFavoriteSongs
                     BeansLogger.shared.log("QQ 我的喜欢页面网络结果为空，使用本地收藏回退 count=\(tracks.count)", level: tracks.isEmpty ? .warn : .info)
@@ -214,5 +223,6 @@ struct PlaylistView: View {
             BeansLogger.shared.log("歌单页面加载失败 source=\(playlist.source.rawValue) id=\(playlist.id) name=\(playlist.name) error=\(error.localizedDescription)", level: .error)
             loading = false
         }
+        recomputeDisplayedTracks()
     }
 }
